@@ -1,0 +1,46 @@
+experiment:
+  name: "dense_scene_mot_experiment"
+  mode: "demo"  # "full" or "demo"
+
+data:
+  video_path: "data/videos/sample.mp4"
+  gt_path: "data/gt/sample_gt.txt"
+  output_dir: "results/"
+
+detector:
+  type: "yolov5"
+  model_path: "weights/yolov5m.pt"
+  conf_thresh: 0.5
+  iou_thresh: 0.45
+  input_size: [640, 640]
+
+tracker:
+  type: "deepsort"
+  max_iou_distance: 0.7
+  max_age: 70
+  n_init: 3
+  nn_budget: 100
+
+reid:
+  type: "clip"
+  weight_path: "weights/clip_reid.pth"
+  use_cuda: true
+
+cropping:
+  strategy: "box"  # "box" or "pose"
+  use_kalman: true
+
+evaluation:
+  metrics:
+    - idf1
+    - idp
+    - idr
+    - mota
+    - num_switches
+  iou_threshold: 0.5
+
+visualization:
+  draw_boxes: true
+  draw_track_id: true
+  draw_trails: false
+  save_results: true

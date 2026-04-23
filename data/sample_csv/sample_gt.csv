@@ -1,0 +1,11 @@
+frame,idx_frame,camera_id,camera_name,box_x1,box_y1,box_x2,box_y2,identity_id,primary_uuid,secondary_uuid,xys
+scene1_001.jpg,1,1,scene1,148,198,202,402,101,uuid_101_001,uuid_101_001_s1,
+scene1_002.jpg,2,1,scene1,153,193,207,407,101,uuid_101_002,uuid_101_002_s1,
+scene1_003.jpg,3,1,scene1,158,188,212,412,101,uuid_101_003,uuid_101_003_s1,
+scene1_004.jpg,4,1,scene1,160,196,210,410,102,uuid_102_004,uuid_102_004_s1,
+scene1_005.jpg,5,1,scene1,302,178,362,382,102,uuid_102_005,uuid_102_005_s1,
+scene1_006.jpg,6,1,scene1,297,183,357,387,102,uuid_102_006,uuid_102_006_s1,
+scene1_007.jpg,7,1,scene1,143,203,197,417,103,uuid_103_007,uuid_103_007_s1,
+scene1_008.jpg,8,1,scene1,138,208,192,422,103,uuid_103_008,uuid_103_008_s1,
+scene1_009.jpg,9,1,scene1,312,173,367,377,104,uuid_104_009,uuid_104_009_s1,
+scene1_010.jpg,10,1,scene1,317,168,372,372,104,uuid_104_010,uuid_104_010_s1,
