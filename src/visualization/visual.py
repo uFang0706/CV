@@ -1,7 +1,11 @@
-import pandas as pd
-import numpy as np
+import ast
+import os
 import warnings
+
 import cv2
+import numpy as np
+import pandas as pd
+
 warnings.filterwarnings('ignore', message='The behavior of DataFrame concatenation with empty or all-NA entries is deprecated')
 
 
@@ -19,20 +23,18 @@ def get_rotated_rect(keypoints, keypoints_conf):
         return None
 
     upper_center = None
-    for pair in upper_pairs:
-        kp1, kp2 = pair
+    for kp1, kp2 in upper_pairs:
         if (keypoints_conf[kp1] > keypoints_conf_threshold and keypoints_conf[kp2] > keypoints_conf_threshold and
-            not (keypoints[kp1][0] == 0 and keypoints[kp1][1] == 0) and
-            not (keypoints[kp2][0] == 0 and keypoints[kp2][1] == 0)):
+                not (keypoints[kp1][0] == 0 and keypoints[kp1][1] == 0) and
+                not (keypoints[kp2][0] == 0 and keypoints[kp2][1] == 0)):
             upper_center = (keypoints[kp1] + keypoints[kp2]) / 2
             break
 
     lower_center = None
-    for pair in lower_pairs:
-        kp1, kp2 = pair
+    for kp1, kp2 in lower_pairs:
         if (keypoints_conf[kp1] > keypoints_conf_threshold and keypoints_conf[kp2] > keypoints_conf_threshold and
-            not (keypoints[kp1][0] == 0 and keypoints[kp1][1] == 0) and
-            not (keypoints[kp2][0] == 0 and keypoints[kp2][1] == 0)):
+                not (keypoints[kp1][0] == 0 and keypoints[kp1][1] == 0) and
+                not (keypoints[kp2][0] == 0 and keypoints[kp2][1] == 0)):
             lower_center = (keypoints[kp1] + keypoints[kp2]) / 2
             break
 
@@ -41,13 +43,11 @@ def get_rotated_rect(keypoints, keypoints_conf):
 
     direction = lower_center - upper_center
     angle = float(np.arctan2(direction[1], direction[0]) * 180 / np.pi)
-
     points = np.array([valid_keypoints], dtype=np.float32)
     rect = cv2.minAreaRect(points[0])
 
     if rect[1][0] > rect[1][1]:
         return None
-
     return rect[0], rect[1], angle - 90
 
 
@@ -55,25 +55,15 @@ def calculate_rotated_rect_vertices(center, size, angle):
     angle_rad = np.radians(angle)
     width, height = size
     x, y = center
-
     half_width = width / 2
     half_height = height / 2
-
-    offsets = [
-        (-half_width, -half_height),
-        (half_width, -half_height),
-        (half_width, half_height),
-        (-half_width, half_height)
-    ]
-
+    offsets = [(-half_width, -half_height), (half_width, -half_height),
+               (half_width, half_height), (-half_width, half_height)]
     vertices = []
     for offset_x, offset_y in offsets:
         rotated_x = offset_x * np.cos(angle_rad) - offset_y * np.sin(angle_rad)
         rotated_y = offset_x * np.sin(angle_rad) + offset_y * np.cos(angle_rad)
-        vertex_x = x + rotated_x
-        vertex_y = y + rotated_y
-        vertices.append((vertex_x, vertex_y))
-
+        vertices.append((x + rotated_x, y + rotated_y))
     return vertices
 
 
@@ -82,92 +72,110 @@ class Visualizer:
         self.record_mem = {}
         self.global_count = 0
 
-    def _process_detection(self, df, id_field='primary_uuid'):
+    @staticmethod
+    def _parse_pose_points(value):
+        """Safely parse optional pose keypoints from CSV; empty/NaN values are ignored."""
+        if pd.isna(value):
+            return None
+        value = str(value).strip()
+        if not value:
+            return None
+        try:
+            parsed = ast.literal_eval(value)
+        except (ValueError, SyntaxError):
+            return None
+        if not isinstance(parsed, (list, tuple)) or len(parsed) < 8:
+            return None
+        return parsed[:8]
+
+    def _process_detection(self, df, id_field='identity_id'):
         mem = {}
-        for index, row in df.iterrows():
-            idx_frame = row['idx_frame']
-            box_x1 = row['box_x1']
-            box_y1 = row['box_y1']
-            box_w = row['box_x2'] - row['box_x1']
-            box_h = row['box_y2'] - row['box_y1']
+        if id_field not in df.columns:
+            id_field = 'identity_id' if 'identity_id' in df.columns else 'primary_uuid'
+
+        for _, row in df.iterrows():
+            idx_frame = int(row['idx_frame'])
+            box_x1 = float(row['box_x1'])
+            box_y1 = float(row['box_y1'])
+            box_w = float(row['box_x2']) - float(row['box_x1'])
+            box_h = float(row['box_y2']) - float(row['box_y1'])
             primary_uuid = row[id_field]
-            camera_id = row['camera_id']
-            camera_name = row['camera_name']
 
             if primary_uuid not in self.record_mem:
                 self.record_mem[primary_uuid] = self.global_count
                 self.global_count += 1
 
-            mark = row['frame']
+            mark = row['frame'] if 'frame' in row and pd.notna(row['frame']) else f"scene1_{idx_frame:03d}.jpg"
             if mark not in mem:
                 mem[mark] = []
 
-            if 'xys' in row:
-                xys = eval(row['xys'])
-                pose_x1, pose_y1 = xys[0], xys[1]
-                pose_x2, pose_y2 = xys[2], xys[3]
-                pose_x3, pose_y3 = xys[4], xys[5]
-                pose_x4, pose_y4 = xys[6], xys[7]
-                mem[mark].append([box_x1, box_y1, box_w, box_h, self.record_mem[primary_uuid],
-                                 pose_x1, pose_y1, pose_x2, pose_y2, pose_x3, pose_y3, pose_x4, pose_y4])
-            else:
-                mem[mark].append([box_x1, box_y1, box_w, box_h, self.record_mem[primary_uuid]])
+            pose = self._parse_pose_points(row['xys']) if 'xys' in row else None
+            item = [box_x1, box_y1, box_w, box_h, self.record_mem[primary_uuid]]
+            if pose is not None:
+                item.extend(pose)
+            mem[mark].append(item)
         return mem
 
-    def visualize(self, csv_path, output_dir=None, id_field='primary_uuid'):
-        csv_df = read_csv(csv_path)
+    @staticmethod
+    def _blank_canvas(items, width=640, height=480):
+        """Create a synthetic canvas when demo images are not shipped in the repo."""
+        if items:
+            arr = np.array(items)[:, :4].astype(float)
+            width = max(width, int(np.max(arr[:, 0] + arr[:, 2]) + 60))
+            height = max(height, int(np.max(arr[:, 1] + arr[:, 3]) + 60))
+        image = np.full((height, width, 3), 245, dtype=np.uint8)
+        cv2.putText(image, 'synthetic demo frame', (20, 35), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (90, 90, 90), 2)
+        return image
+
+    def visualize(self, csv_path, output_dir=None, id_field='identity_id'):
+        csv_df = pd.read_csv(csv_path)
         mem_csv = self._process_detection(csv_df, id_field)
 
         if output_dir is not None:
-            import os
             os.makedirs(output_dir, exist_ok=True)
 
-        for k in mem_csv:
-            filename = k
-            prx1y1wh = np.array(mem_csv[k])[:, :4]
-            pr_id = np.array(mem_csv[k])[:, 4].tolist()
-            pose_xys = np.array(mem_csv[k])[:, 5:]
-
-            image = cv2.imread(filename)
+        saved = 0
+        for frame_name, items in mem_csv.items():
+            image = cv2.imread(frame_name) if os.path.exists(str(frame_name)) else None
             if image is None:
-                print(f"无法读取图像: {filename}")
-                continue
+                image = self._blank_canvas(items)
 
-            for i, (x1, y1, w, h) in enumerate(prx1y1wh):
+            for item in items:
+                x1, y1, w, h, track_id = item[:5]
                 x1, y1, w, h = int(x1), int(y1), int(w), int(h)
-                cv2.rectangle(image, (x1, y1), (x1 + w, y1 + h), (0, 255, 0), 2)
-                cv2.putText(image, str(pr_id[i]), (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 2)
-
-            for pose_xy in pose_xys:
-                pose_xy = pose_xy.reshape(-1, 2)
-                for x, y in pose_xy:
-                    if x != 0 and y != 0:
-                        x, y = int(x), int(y)
-                        cv2.circle(image, (x, y), 5, (0, 0, 255), -1)
+                cv2.rectangle(image, (x1, y1), (x1 + w, y1 + h), (37, 138, 255), 2)
+                cv2.putText(image, f"ID:{track_id}", (x1, max(20, y1 - 8)),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.65, (37, 138, 255), 2)
+                if len(item) > 5:
+                    pose_xy = np.array(item[5:]).reshape(-1, 2)
+                    for x, y in pose_xy:
+                        if x != 0 and y != 0:
+                            cv2.circle(image, (int(x), int(y)), 4, (50, 180, 50), -1)
 
             if output_dir is not None:
-                output_path = os.path.join(output_dir, f"vis_{k}.jpg")
+                safe_name = os.path.basename(str(frame_name)).replace(os.sep, '_')
+                output_path = os.path.join(output_dir, f"vis_{safe_name}")
                 cv2.imwrite(output_path, image)
+                saved += 1
             else:
                 cv2.imshow('Visualization', image)
                 cv2.waitKey(0)
 
-        cv2.destroyAllWindows()
+        if output_dir is None:
+            cv2.destroyAllWindows()
+        print(f"Visualization completed. Saved {saved} frames to {output_dir}" if output_dir else "Visualization completed.")
 
     def visualize_tracking_result(self, image, boxes, track_ids, pose_points=None, output_path=None):
         for i, (box, track_id) in enumerate(zip(boxes, track_ids)):
             x1, y1, w, h = map(int, box)
             x2, y2 = x1 + w, y1 + h
-
-            cv2.rectangle(image, (x1, y1), (x2, y2), (0, 255, 0), 2)
+            cv2.rectangle(image, (x1, y1), (x2, y2), (37, 138, 255), 2)
             cv2.putText(image, f"ID:{track_id}", (x1, y1 - 10),
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (37, 138, 255), 2)
             if pose_points is not None and i < len(pose_points):
                 for x, y in pose_points[i]:
                     if x > 0 and y > 0:
-                        cv2.circle(image, (int(x), int(y)), 3, (0, 0, 255), -1)
-
+                        cv2.circle(image, (int(x), int(y)), 3, (50, 180, 50), -1)
         if output_path:
             cv2.imwrite(output_path, image)
         else:
@@ -176,17 +184,12 @@ class Visualizer:
             cv2.destroyAllWindows()
 
 
-def read_csv(csv_path):
-    df = pd.read_csv(csv_path)
-    return df
-
-
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument("--csv_file", type=str, required=True, help="CSV file with tracking results")
-    parser.add_argument("--output_dir", type=str, default=None, help="Output directory for visualizations")
-    parser.add_argument("--id_field", type=str, default='primary_uuid', help="ID field name")
+    parser.add_argument('--csv_file', type=str, required=True, help='CSV file with tracking results')
+    parser.add_argument('--output_dir', type=str, default=None, help='Output directory for visualizations')
+    parser.add_argument('--id_field', type=str, default='identity_id', help='ID field name')
     args = parser.parse_args()
 
     model = Visualizer()

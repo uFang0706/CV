@@ -117,17 +117,17 @@ def generate_cropping_comparison():
 def generate_tracking_comparison():
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
 
-    methods = ['DeepSORT\n(Baseline)', '+CLIP', '+Attr', '+Fusion', '+Pose\nCrop']
-    idf1_values = [68.5, 72.3, 70.8, 74.6, 78.2]
-    id_switches = [156, 124, 138, 98, 67]
+    methods = ['Baseline', 'Box\nCrop', 'Kalman', 'Pose\nCrop']
+    idf1_values = [97.44, 100.0, 100.0, 100.0]
+    id_switches = [1, 1, 2, 0]
 
-    colors = ['#2196F3', '#4CAF50', '#FF9800', '#9C27B0', '#F44336']
+    colors = ['#2196F3', '#4CAF50', '#FF9800', '#F44336']
 
     bars1 = ax1.bar(methods, idf1_values, color=colors, edgecolor='black', linewidth=1.2)
     ax1.set_ylabel('IDF1 (%)', fontsize=11)
     ax1.set_title('IDF1 Comparison Across Methods', fontsize=12, fontweight='bold')
-    ax1.set_ylim(60, 85)
-    ax1.axhline(y=68.5, color='gray', linestyle='--', alpha=0.5, label='Baseline')
+    ax1.set_ylim(94, 101)
+    ax1.axhline(y=97.44, color='gray', linestyle='--', alpha=0.5, label='Baseline')
     for bar, val in zip(bars1, idf1_values):
         ax1.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.5,
                 f'{val:.1f}', ha='center', va='bottom', fontsize=9, fontweight='bold')
@@ -136,10 +136,10 @@ def generate_tracking_comparison():
     bars2 = ax2.bar(methods, id_switches, color=colors, edgecolor='black', linewidth=1.2)
     ax2.set_ylabel('ID Switches', fontsize=11)
     ax2.set_title('ID Switches Comparison Across Methods', fontsize=12, fontweight='bold')
-    ax2.set_ylim(0, 180)
-    ax2.axhline(y=156, color='gray', linestyle='--', alpha=0.5, label='Baseline')
+    ax2.set_ylim(0, 3)
+    ax2.axhline(y=1, color='gray', linestyle='--', alpha=0.5, label='Baseline')
     for bar, val in zip(bars2, id_switches):
-        ax2.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 3,
+        ax2.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.08,
                 f'{val}', ha='center', va='bottom', fontsize=9, fontweight='bold')
     ax2.legend()
 
@@ -200,9 +200,9 @@ def generate_tracking_visualization():
 def generate_ablation_chart():
     fig, ax = plt.subplots(1, 1, figsize=(8, 5))
 
-    configs = ['Standard\nCrop', '+Head\nKeypoints', '+Body\nKeypoints', '+All\nKeypoints']
-    idf1_values = [74.6, 75.8, 76.5, 78.2]
-    id_switches = [98, 89, 81, 67]
+    configs = ['Box\nCrop', '+Motion\nPrediction', '+Pose\nCrop']
+    idf1_values = [100.0, 100.0, 100.0]
+    id_switches = [1, 2, 0]
 
     x = np.arange(len(configs))
     width = 0.35
@@ -216,8 +216,8 @@ def generate_ablation_chart():
     ax.set_xlabel('Cropping Configuration', fontsize=11)
     ax.set_xticks(x)
     ax.set_xticklabels(configs)
-    ax.set_ylim(70, 82)
-    ax2.set_ylim(50, 110)
+    ax.set_ylim(94, 101)
+    ax2.set_ylim(0, 3)
 
     ax.set_title('Pose Keypoints Ablation Study', fontsize=12, fontweight='bold')
 
@@ -226,7 +226,7 @@ def generate_ablation_chart():
                f'{val:.1f}', ha='center', va='bottom', fontsize=9, fontweight='bold', color='#2196F3')
 
     for bar, val in zip(bars2, id_switches):
-        ax2.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 1,
+        ax2.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.08,
                 f'{val}', ha='center', va='bottom', fontsize=9, fontweight='bold', color='#F44336')
 
     lines1, labels1 = ax.get_legend_handles_labels()

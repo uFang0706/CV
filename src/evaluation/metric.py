@@ -2,256 +2,216 @@ import pandas as pd
 import numpy as np
 import warnings
 from prettytable import PrettyTable
+from scipy.optimize import linear_sum_assignment
+
 warnings.filterwarnings('ignore', message='The behavior of DataFrame concatenation with empty or all-NA entries is deprecated')
 
 
-def read_file(path, id_field):
+def read_file(path, id_field=None):
+    """Read tracking/ground-truth files in CSV, XLSX or MOT txt format."""
     if path.endswith('csv'):
-        return read_csv(path)
-    elif path.endswith('xlsx'):
-        return read_excel(path, id_field)
-    elif path.endswith('txt'):
-        return read_txt(path)
-    else:
-        raise ValueError(f"Unsupported file format: {path}")
-
-
-def read_txt(txt_path):
-    df = pd.read_csv(txt_path,
-                     sep=',',
-                     names=['frame_number',
-                            'identity_id',
-                            'left',
-                            'top',
-                            'width',
-                            'height',
-                            'score',
-                            'x',
-                            'y',
-                            'z'])
-    return df
-
-
-def read_csv(csv_path):
-    df = pd.read_csv(csv_path)
-    return df
-
-
-def read_excel(excel_path, id_field):
-    all_dfs = []
-    xls = pd.ExcelFile(excel_path)
-    for sheet_name in xls.sheet_names:
-        df = xls.parse(sheet_name)
-        all_dfs.append(df)
-    result_df = pd.concat(all_dfs, ignore_index=True)
-    return result_df
+        return pd.read_csv(path)
+    if path.endswith('xlsx'):
+        xls = pd.ExcelFile(path)
+        return pd.concat([xls.parse(sheet) for sheet in xls.sheet_names], ignore_index=True)
+    if path.endswith('txt'):
+        return pd.read_csv(
+            path,
+            sep=',',
+            names=['frame_number', 'identity_id', 'left', 'top', 'width', 'height', 'score', 'x', 'y', 'z']
+        )
+    raise ValueError(f"Unsupported file format: {path}")
 
 
 def iou(box1, box2):
+    """IoU for boxes in [x, y, w, h] format."""
     x1 = max(box1[0], box2[0])
     y1 = max(box1[1], box2[1])
     x2 = min(box1[0] + box1[2], box2[0] + box2[2])
     y2 = min(box1[1] + box1[3], box2[1] + box2[3])
     inter_area = max(0, x2 - x1) * max(0, y2 - y1)
-    box1_area = box1[2] * box1[3]
-    box2_area = box2[2] * box2[3]
+    box1_area = max(0, box1[2]) * max(0, box1[3])
+    box2_area = max(0, box2[2]) * max(0, box2[3])
     union_area = box1_area + box2_area - inter_area
     return inter_area / (union_area + 1e-6)
 
 
 def linear_assignment(cost_matrix, threshold=0.5):
+    """Optimal Hungarian assignment filtered by maximum allowed cost."""
     if cost_matrix.size == 0:
         return [], list(range(cost_matrix.shape[0])), list(range(cost_matrix.shape[1]))
 
-    n_rows, n_cols = cost_matrix.shape
-    rows = list(range(n_rows))
-    cols = list(range(n_cols))
+    row_ind, col_ind = linear_sum_assignment(cost_matrix)
     matches = []
-    unmatched_rows = []
-    unmatched_cols = []
+    matched_rows = set()
+    matched_cols = set()
+    for i, j in zip(row_ind, col_ind):
+        if cost_matrix[i, j] <= threshold:
+            matches.append((int(i), int(j)))
+            matched_rows.add(int(i))
+            matched_cols.add(int(j))
 
-    while rows and cols:
-        min_val = float('inf')
-        min_i, min_j = -1, -1
-
-        for i in rows:
-            for j in cols:
-                if cost_matrix[i, j] < min_val and cost_matrix[i, j] < threshold:
-                    min_val = cost_matrix[i, j]
-                    min_i, min_j = i, j
-
-        if min_i >= 0:
-            matches.append((min_i, min_j))
-            rows.remove(min_i)
-            cols.remove(min_j)
-        else:
-            break
-
-    unmatched_rows = rows
-    unmatched_cols = cols
-
+    unmatched_rows = [i for i in range(cost_matrix.shape[0]) if i not in matched_rows]
+    unmatched_cols = [j for j in range(cost_matrix.shape[1]) if j not in matched_cols]
     return matches, unmatched_rows, unmatched_cols
 
 
 class TrackEval:
+    """
+    Lightweight MOT-style evaluator for coursework/demo use.
+
+    It computes IDF1/IDP/IDR from detection matches and a simplified MOTA:
+        MOTA = 1 - (FN + FP + IDSW) / GT_detections
+    """
+
     def __init__(self, if_kuajing=False):
-        self.record_mem = {}
-        self.global_count = 1
         self.if_kuajing = if_kuajing
-        
+        self.reset()
+
+    def reset(self):
         self.tp = 0
         self.fp = 0
         self.fn = 0
         self.id_switches = 0
-        self.gt_ids = set()
-        self.pr_ids = set()
+        self.gt_detections = 0
+        self.pr_detections = 0
         self.frame_matches = {}
         self.track_assignments = {}
 
-    def _process_detection_csv(self, df, id_field='primary_uuid', mark_id=0):
+    def _process_detection_csv(self, df, id_field='identity_id', mark_id=0):
         mem = {}
-        for index, row in df.iterrows():
-            idx_frame = row["idx_frame"]
-            box_x1 = row["box_x1"]
-            box_y1 = row["box_y1"]
-            box_w = row["box_x2"] - row["box_x1"]
-            box_h = row["box_y2"] - row["box_y1"]
-            primary_uuid = row[id_field]
-            camera_id = row.get("camera_id", "1")
-            camera_name = row.get("camera_name", "scene1")
+        if id_field not in df.columns:
+            fallback = 'identity_id' if 'identity_id' in df.columns else 'primary_uuid'
+            if fallback not in df.columns:
+                raise ValueError(f"ID field '{id_field}' not found and no fallback ID column exists")
+            id_field = fallback
 
-            if primary_uuid not in self.record_mem:
-                self.record_mem[primary_uuid] = self.global_count
-                self.global_count += 1
+        for _, row in df.iterrows():
+            idx_frame = int(row['idx_frame'])
+            box_x1 = float(row['box_x1'])
+            box_y1 = float(row['box_y1'])
+            box_w = float(row['box_x2']) - float(row['box_x1'])
+            box_h = float(row['box_y2']) - float(row['box_y1'])
+            track_id = row[id_field]
+            camera_id = row.get('camera_id', '1')
+            camera_name = row.get('camera_name', 'scene1')
+
             if mark_id == 0:
-                mark = str(camera_id) + "_" + str(camera_name) + "_" + str(idx_frame)
+                mark = f"{camera_id}_{camera_name}_{idx_frame}"
             elif mark_id == 1:
-                mark = str(int(idx_frame))
+                mark = str(idx_frame)
             else:
-                raise ValueError()
-            if mark not in mem:
-                mem[mark] = []
-            mem[mark].append([box_x1, box_y1, box_w, box_h, self.record_mem[primary_uuid]])
+                raise ValueError(f"Unsupported mark_id: {mark_id}")
+
+            mem.setdefault(mark, []).append([box_x1, box_y1, box_w, box_h, track_id])
         return mem
 
     def _process_detection_txt(self, df, mark_id=0):
         mem = {}
-        for index, row in df.iterrows():
+        for _, row in df.iterrows():
             idx_frame = int(row['frame_number'])
-            box_x1 = row['left']
-            box_y1 = row['top']
-            box_w = row['width']
-            box_h = row['height']
-            primary_uuid = row['identity_id']
-
-            if primary_uuid not in self.record_mem:
-                self.record_mem[primary_uuid] = self.global_count
-                self.global_count += 1
             mark = str(idx_frame)
-            if mark not in mem:
-                mem[mark] = []
-            mem[mark].append([box_x1, box_y1, box_w, box_h, self.record_mem[primary_uuid]])
+            mem.setdefault(mark, []).append([
+                float(row['left']), float(row['top']), float(row['width']), float(row['height']), row['identity_id']
+            ])
         return mem
 
     def _process_detection(self, df, suffix, id_field, mark):
         if suffix == 'txt':
             return self._process_detection_txt(df, mark)
-        elif suffix == 'csv' or suffix == 'xlsx':
+        if suffix in {'csv', 'xlsx'}:
             return self._process_detection_csv(df, id_field, mark)
+        raise ValueError(f"Unsupported suffix: {suffix}")
 
-    def evaluate(self, pr_path, gt_path, id_field, mark_id):
+    def evaluate(self, pr_path, gt_path, id_field='identity_id', mark_id=1, iou_threshold=0.5):
+        self.reset()
         pr_df = read_file(pr_path, id_field)
         gt_df = read_file(gt_path, id_field)
         pr_suffix = pr_path.split('.')[-1]
         gt_suffix = gt_path.split('.')[-1]
 
-        pr_id = id_field
-        gt_id = id_field
+        pr_id = 'secondary_uuid' if self.if_kuajing and 'secondary_uuid' in pr_df.columns else id_field
+        mem_pr = self._process_detection(pr_df, pr_suffix, pr_id, mark_id)
+        mem_gt = self._process_detection(gt_df, gt_suffix, id_field, mark_id)
 
-        if self.if_kuajing:
-            pr_id = 'secondary_uuid'
+        self.gt_detections = sum(len(v) for v in mem_gt.values())
+        self.pr_detections = sum(len(v) for v in mem_pr.values())
 
-        mem_pr = self._process_detection(pr_df, pr_suffix, pr_id, 0)
-        mem_gt = self._process_detection(gt_df, gt_suffix, gt_id, 1)
+        matched_pr_keys = set()
+        for frame in sorted(mem_gt.keys(), key=lambda x: int(x) if str(x).isdigit() else str(x)):
+            gt_items = mem_gt[frame]
+            pr_items = mem_pr.get(frame, [])
+            if frame in mem_pr:
+                matched_pr_keys.add(frame)
 
-        for k in mem_gt:
-            for value in mem_gt[k]:
-                self.gt_ids.add(value[-1])
+            if not pr_items:
+                self.fn += len(gt_items)
+                continue
 
-        for k in mem_pr:
-            for value in mem_pr[k]:
-                self.pr_ids.add(value[-1])
+            gt_boxes = np.array(gt_items)[:, :4].astype(float)
+            pr_boxes = np.array(pr_items)[:, :4].astype(float)
+            gt_ids = [item[-1] for item in gt_items]
+            pr_ids = [item[-1] for item in pr_items]
 
-        for frame in mem_gt:
-            pr_key = None
-            for pk in mem_pr.keys():
-                if pk.endswith(f"_{frame}"):
-                    pr_key = pk
-                    break
+            cost_matrix = np.ones((len(gt_boxes), len(pr_boxes))) * 2.0
+            for i in range(len(gt_boxes)):
+                for j in range(len(pr_boxes)):
+                    cost_matrix[i, j] = 1 - iou(gt_boxes[i], pr_boxes[j])
 
-            if pr_key and pr_key in mem_pr:
-                gt_boxes = np.array(mem_gt[frame])[:, :4]
-                pr_boxes = np.array(mem_pr[pr_key])[:, :4]
-                gt_ids = np.array(mem_gt[frame])[:, -1].tolist()
-                pr_ids = np.array(mem_pr[pr_key])[:, -1].tolist()
+            matches, unmatched_gt, unmatched_pr = linear_assignment(cost_matrix, threshold=1 - iou_threshold)
+            self.tp += len(matches)
+            self.fn += len(unmatched_gt)
+            self.fp += len(unmatched_pr)
 
-                n_gt = len(gt_boxes)
-                n_pr = len(pr_boxes)
+            self.frame_matches[frame] = []
+            for i, j in matches:
+                gt_id = gt_ids[i]
+                pr_id_value = pr_ids[j]
+                self.frame_matches[frame].append((gt_id, pr_id_value))
+                if gt_id in self.track_assignments and self.track_assignments[gt_id] != pr_id_value:
+                    self.id_switches += 1
+                self.track_assignments[gt_id] = pr_id_value
 
-                cost_matrix = np.ones((n_gt, n_pr)) * 2.0
-
-                for i in range(n_gt):
-                    for j in range(n_pr):
-                        cost_matrix[i, j] = 1 - iou(gt_boxes[i], pr_boxes[j])
-
-                matches, unmatched_gt, unmatched_pr = linear_assignment(cost_matrix, threshold=0.5)
-
-                self.tp += len(matches)
-                self.fn += len(unmatched_gt)
-                self.fp += len(unmatched_pr)
-
-                self.frame_matches[frame] = []
-                for i, j in matches:
-                    self.frame_matches[frame].append((gt_ids[i], pr_ids[j]))
-
-                    if gt_ids[i] in self.track_assignments:
-                        if self.track_assignments[gt_ids[i]] != pr_ids[j]:
-                            self.id_switches += 1
-                    self.track_assignments[gt_ids[i]] = pr_ids[j]
+        # predictions on frames with no GT are false positives
+        for pk, items in mem_pr.items():
+            if pk not in matched_pr_keys:
+                self.fp += len(items)
 
     def get_result(self):
-        total_objects = len(self.gt_ids)
-        total_predictions = len(self.pr_ids)
-
         IDP = self.tp / (self.tp + self.fp) if (self.tp + self.fp) > 0 else 0
         IDR = self.tp / (self.tp + self.fn) if (self.tp + self.fn) > 0 else 0
         IDF1 = 2 * IDP * IDR / (IDP + IDR) if (IDP + IDR) > 0 else 0
+        MOTA = 1 - (self.fn + self.fp + self.id_switches) / self.gt_detections if self.gt_detections > 0 else 0
 
-        table = PrettyTable()
-        table.field_names = ["IDF1(up)", "IDP(up)", "IDR(up)", "IDs(down)", "GTs"]
-        table.add_row([round(IDF1*100, 2), round(IDP*100, 2), round(IDR*100, 2), self.id_switches, total_objects])
-
-        print(table)
-        print("\nDetailed Results:")
-        print(f"True Positives: {self.tp}")
-        print(f"False Positives: {self.fp}")
-        print(f"False Negatives: {self.fn}")
-
-        return {
-            'IDF1': round(IDF1*100, 2),
-            'IDP': round(IDP*100, 2),
-            'IDR': round(IDR*100, 2),
-            'IDs': self.id_switches,
-            'GTs': total_objects
+        result = {
+            'IDF1': round(IDF1 * 100, 2),
+            'IDP': round(IDP * 100, 2),
+            'IDR': round(IDR * 100, 2),
+            'MOTA': round(MOTA * 100, 2),
+            'IDs': int(self.id_switches),
+            'GTs': int(self.gt_detections),
+            'TP': int(self.tp),
+            'FP': int(self.fp),
+            'FN': int(self.fn),
         }
 
+        table = PrettyTable()
+        table.field_names = ['IDF1(up)', 'IDP(up)', 'IDR(up)', 'MOTA(up)', 'IDs(down)', 'GT dets']
+        table.add_row([result['IDF1'], result['IDP'], result['IDR'], result['MOTA'], result['IDs'], result['GTs']])
+        print(table)
+        print('\nDetailed Results:')
+        print(f"True Positives: {result['TP']}")
+        print(f"False Positives: {result['FP']}")
+        print(f"False Negatives: {result['FN']}")
+        return result
 
-if __name__ == "__main__":
+
+if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument("--pred_file", type=str, required=True, help="Prediction results CSV file")
-    parser.add_argument("--gt_file", type=str, required=True, help="Ground truth file")
-    parser.add_argument("--id_field", type=str, default='primary_uuid', help="ID field name")
+    parser.add_argument('--pred_file', type=str, required=True, help='Prediction results CSV file')
+    parser.add_argument('--gt_file', type=str, required=True, help='Ground truth file')
+    parser.add_argument('--id_field', type=str, default='identity_id', help='ID field name')
     args = parser.parse_args()
 
     evaluator = TrackEval()

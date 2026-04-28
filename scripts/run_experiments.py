@@ -48,7 +48,7 @@ def run_single_experiment(exp_name, pred_file, gt_file=None):
 
     evaluator = TrackEval()
     if gt_file and os.path.exists(gt_file):
-        evaluator.evaluate(pred_file, gt_file, id_field='primary_uuid', mark_id=1)
+        evaluator.evaluate(pred_file, gt_file, id_field='identity_id', mark_id=1)
         results = evaluator.get_result()
     else:
         print("Note: No ground truth file, skipping full evaluation")

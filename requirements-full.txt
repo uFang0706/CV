@@ -1,0 +1,6 @@
+-r requirements.txt
+# Optional dependencies for the full detector/ReID pipeline.
+# Install only when CUDA/model weights are available.
+torch>=1.7.0
+torchvision>=0.8.0
+motmetrics>=1.1.0

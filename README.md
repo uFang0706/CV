@@ -1,203 +1,189 @@
-# 面向密集公共场景的ReID辅助多目标行人跟踪实验分析
+# 面向密集公共场景的 ReID 辅助多目标行人跟踪实验分析
 
-## 项目简介
+本仓库是计算机视觉课程作业代码包，围绕 **密集公共场景中的多目标行人跟踪（Multi-Object Tracking, MOT）与身份保持问题** 展开。项目重点分析 ReID 外观特征、姿态感知裁剪策略与运动预测对 IDF1、IDP、IDR、MOTA 和 ID Switches 等指标的影响。
 
-本项目是计算机视觉课程作业，专注于研究密集公共场景下的多目标行人跟踪问题。通过比较不同ReID特征提取方法和姿态感知裁剪策略，分析其对跟踪性能的影响。
+> 说明：仓库中不包含真实原始视频、模型权重或隐私数据。为了便于教师快速复现，仓库提供了可在 CPU 上运行的合成 Demo 数据；完整检测/ReID/跟踪流程保留接口结构，可在具备 CUDA、预训练权重和数据后扩展运行。
 
-## 目录结构
+## 1. 项目结构
 
-```
-cv-mot-coursework/
-├── src/
-│   ├── config/              # 配置文件
-│   │   └── default.yaml
-│   ├── cropping/           # 裁剪策略模块
-│   │   └── crop_strategy.py
-│   ├── evaluation/         # 评估指标计算
-│   │   └── metric.py
-│   ├── tracking/           # 跟踪器实现
-│   │   └── tracker.py
-│   ├── utils/               # 工具函数
-│   │   └── io.py
-│   └── visualization/       # 可视化模块
-│       └── visual.py
-├── scripts/                 # 运行脚本
-│   ├── run_demo.py          # Demo模式运行
-│   ├── evaluate.py          # 评估脚本
-│   ├── visualize.py         # 可视化脚本
-│   └── run_experiments.py   # 实验批量运行
+```text
+CV/
+├── README.md
+├── requirements.txt              # Demo mode 依赖，CPU 可运行
+├── requirements-full.txt         # Full mode 可选依赖
+├── generate_figures.py           # 生成报告示意图
 ├── data/
-│   ├── sample_csv/          # 示例CSV数据
-│   └── demo_results/        # Demo结果
-├── results/                 # 实验结果输出
-│   ├── metrics/
-│   └── visualizations/
-├── docs/                    # 文档
-└── README.md
+│   ├── sample_csv/
+│   │   ├── sample_gt.csv
+│   │   └── sample_tracking_results.csv
+│   └── demo_results/
+│       ├── baseline_results.csv
+│       ├── box_crop_results.csv
+│       ├── kalman_results.csv
+│       └── pose_crop_results.csv
+├── scripts/
+│   ├── run_demo.py               # 一键运行 Demo 评估与可视化
+│   ├── evaluate.py               # 单文件评估
+│   ├── visualize.py              # 跟踪结果可视化
+│   └── run_experiments.py        # 多方法对比实验
+├── src/
+│   ├── config/default.yaml
+│   ├── cropping/crop_strategy.py
+│   ├── evaluation/metric.py
+│   ├── tracking/tracker.py
+│   ├── utils/io.py
+│   └── visualization/visual.py
+├── results/                      # 运行后自动生成指标与可视化结果
+└── report/
+    └── cv_mot_coursework.tex     # 课程报告 LaTeX 源文件
 ```
 
-## 运行模式
+## 2. 快速开始：CPU Demo Mode
 
-### Demo模式（推荐先使用）
+### 2.1 安装依赖
 
-Demo模式无需CUDA和模型权重，可直接运行评估和可视化功能：
+```bash
+pip install -r requirements.txt
+```
+
+### 2.2 一键运行 Demo
 
 ```bash
 python scripts/run_demo.py
 ```
 
-### Full模式
+该命令会完成：
 
-Full模式需要：
-- CUDA环境
-- YOLO检测模型权重
-- ReID特征提取模型权重
+1. 读取 `data/demo_results/pose_crop_results.csv` 和 `data/sample_csv/sample_gt.csv`；
+2. 计算 IDF1、IDP、IDR、MOTA、ID Switches；
+3. 生成合成帧上的跟踪可视化，输出到 `results/visualizations/`。
 
-```bash
-python scripts/run_demo.py --mode full --config src/config/default.yaml
-```
-
-## 核心功能
-
-### 1. 评估指标计算
-
-支持MOT Challenge标准指标：
-- **IDF1**: 身份识别的F1分数
-- **MOTA**: 多目标跟踪准确度
-- **ID Switch**: 身份切换次数
-- **IDP/IDR**: 身份精确率/召回率
+### 2.3 单独运行评估
 
 ```bash
-python scripts/evaluate.py --pred_file data/sample_csv/sample_tracking_results.csv --gt_file data/sample_csv/sample_gt.csv
+python scripts/evaluate.py \
+  --pred_file data/sample_csv/sample_tracking_results.csv \
+  --gt_file data/sample_csv/sample_gt.csv
 ```
 
-### 2. 结果可视化
+输出文件默认保存到：
 
-```bash
-python scripts/visualize.py --csv_file data/sample_csv/sample_tracking_results.csv --output_dir results/visualizations
+```text
+results/metrics/eval_results.txt
 ```
 
-### 3. 批量实验
+### 2.4 运行多方法对比实验
 
 ```bash
 python scripts/run_experiments.py --exp all
 ```
 
-## 实验设计
+该命令会比较四组设置：
 
-### 对比方法
+| 方法 | 含义 |
+|---|---|
+| Baseline | 基础检测框 + DeepSORT 风格关联 |
+| Box Crop | 标准边界框裁剪的 ReID 表征 |
+| Kalman | 加入运动预测以平滑轨迹 |
+| Pose Crop | 姿态感知裁剪，减少背景和遮挡干扰 |
 
-1. **Baseline**: YOLO + DeepSORT基础跟踪
-2. **Box Crop**: 标准边界框裁剪的ReID特征
-3. **Pose Crop**: 基于姿态估计的裁剪策略
-4. **Kalman**: Kalman滤波器运动预测加速
+### 2.5 生成报告插图
 
-### 裁剪策略
-
-#### 标准框裁剪（Box Crop）
-- 直接使用检测框进行裁剪
-- 简单高效，但可能包含背景噪声
-
-#### 姿态感知裁剪（Pose Crop）
-- 利用人体关键点估计
-- 减少背景和遮挡区域干扰
-- 提取更稳定的人体特征
-
-## 依赖项
-
-```
-motmetrics>=1.1.0
-numpy>=1.19.0
-pandas>=1.0.0
-opencv-python>=4.5.0
-pyyaml>=5.4.0
-prettytable>=0.7.0
-```
-
-安装依赖：
 ```bash
-pip install -r requirements.txt
+python generate_figures.py
 ```
 
-## 数据格式
+输出目录：
 
-### 输入CSV格式
-
-跟踪结果CSV文件应包含以下列：
-- `frame`: 帧图像文件名
-- `idx_frame`: 帧编号
-- `camera_id`: 摄像头ID
-- `camera_name`: 摄像头名称
-- `box_x1`, `box_y1`, `box_x2`, `box_y2`: 检测框坐标
-- `identity_id`: 行人ID
-- `primary_uuid`: 唯一标识符
-
-### 关键点数据格式
-
-可选的xys列存储姿态关键点信息，格式为JSON列表：
-```python
-[x1, y1, x2, y2, x3, y3, x4, y4]  # 4个关键点坐标
+```text
+report/figures/
 ```
 
-## 配置说明
+## 3. 任务定义
 
-配置文件使用YAML格式，位于 `src/config/default.yaml`：
+给定视频序列中的行人检测结果，多目标跟踪的目标是在连续帧中维持每个行人的身份一致性。密集场景中常见的遮挡、交叉路径、尺度变化和外观相似会导致 ID Switches 增多。本文关注的问题是：
 
-```yaml
-experiment:
-  mode: "demo"
+> 在密集公共场景的行人多目标跟踪中，ReID 外观特征与姿态感知裁剪能否提升身份保持能力？
 
-detector:
-  type: "yolov5"
-  conf_thresh: 0.5
+## 4. 方法概要
 
-tracker:
-  type: "deepsort"
-  max_iou_distance: 0.7
-  max_age: 70
+本项目采用检测驱动跟踪范式：
 
-cropping:
-  strategy: "box"  # or "pose"
-
-evaluation:
-  metrics: ["idf1", "idp", "idr", "mota", "num_switches"]
+```text
+Video / Frames
+    ↓
+Person Detection
+    ↓
+Person Crop / Pose-aware Crop
+    ↓
+ReID Feature Extraction
+    ↓
+Motion Prediction + Data Association
+    ↓
+Tracking Results + Evaluation
 ```
 
-## 注意事项
+其中，姿态感知裁剪利用人体关键点估计更稳定的人体区域，减少背景区域和遮挡区域进入 ReID 特征，从而提升身份匹配的稳定性。
 
-1. **数据保密**：本项目不包含任何真实监控数据，所有示例数据均为合成数据
-2. **敏感信息**：代码和文档中已移除所有与具体场所相关的信息
-3. **模型权重**：Full模式需要额外下载模型权重文件
+## 5. 数据说明
 
-## 实验结果
+仓库中的 CSV 均为课程 Demo 用合成数据，用于验证代码流程、指标计算和可视化，不包含真实监控视频或隐私信息。
 
-Demo模式下可获得以下类型的分析结果：
+CSV 字段包括：
 
-- IDF1/MOTA等指标对比表
-- 不同裁剪策略的效果对比
-- 跟踪可视化结果
+| 字段 | 说明 |
+|---|---|
+| `frame` | 帧图像名；Demo 中若没有真实图片，会自动生成合成背景 |
+| `idx_frame` | 帧编号 |
+| `camera_id`, `camera_name` | 场景/摄像头标识 |
+| `box_x1`, `box_y1`, `box_x2`, `box_y2` | 行人检测框坐标 |
+| `identity_id` | 评估用身份 ID |
+| `primary_uuid`, `secondary_uuid` | 兼容扩展 ID 字段 |
+| `xys` | 可选姿态关键点坐标 |
 
-## 扩展方向
+## 6. 评估指标
 
-1. **更强ReID模型**: 集成更先进的ReID特征提取网络
-2. **遮挡感知**: 针对严重遮挡场景的特征更新策略
-3. **跨镜跟踪**: 多摄像头场景下的身份匹配
+| 指标 | 含义 | 趋势 |
+|---|---|---|
+| IDF1 | 身份匹配 F1 分数 | 越高越好 |
+| IDP | 身份匹配精确率 | 越高越好 |
+| IDR | 身份匹配召回率 | 越高越好 |
+| MOTA | 综合 FP、FN、ID Switch 的跟踪准确率 | 越高越好 |
+| IDs | ID Switches，身份切换次数 | 越低越好 |
 
-## 课程作业相关
+## 7. Full Mode 扩展
 
-本项目用于以下课程作业：
-- 课程名称：计算机视觉
-- 作业主题：面向密集公共场景的ReID辅助多目标行人跟踪实验分析
-- 核心问题：研究姿态感知裁剪和ReID特征对身份保持能力的影响
+完整模式需要额外准备：
 
-## 致谢
+- CUDA 环境；
+- YOLO/行人检测模型权重；
+- ReID 或 CLIP-ReID 特征模型权重；
+- 真实或公开 MOT 数据序列。
 
-本项目基于以下开源工作：
-- DeepSORT
-- YOLOv5
-- CLIP ReID
-- MOTMetrics
+可选依赖安装：
 
-## 许可证
+```bash
+pip install -r requirements-full.txt
+```
 
-本项目仅用于课程作业和研究目的。
+当前仓库优先保证课程评阅时的 **CPU Demo 可复现性**，Full mode 以接口和配置形式保留，便于后续接入真实检测器与 ReID 模型。
+
+## 8. 课程报告对应关系
+
+| 报告部分 | 对应代码/数据 |
+|---|---|
+| 方法框架 | `src/tracking/`, `src/cropping/`, `src/evaluation/` |
+| 实验设置 | `src/config/default.yaml`, `data/demo_results/` |
+| 指标计算 | `src/evaluation/metric.py`, `scripts/evaluate.py` |
+| 可视化 | `src/visualization/visual.py`, `scripts/visualize.py` |
+| 报告插图 | `generate_figures.py`, `report/figures/` |
+
+## 9. 注意事项
+
+1. Demo 数据用于教学复现，不能视为真实场景性能结论。
+2. 报告中的方法设计与实验分析强调“可解释的小型研究”，不是完整工业系统复刻。
+3. 如果使用真实数据或公开数据集复现实验，应在报告中明确数据来源、预处理方式和划分策略。
+
+## 10. License
+
+本项目仅用于课程作业、教学演示与研究学习。

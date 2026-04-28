@@ -33,7 +33,7 @@ def run_demo_mode():
         df.to_csv(gt_file, index=False)
 
     evaluator = TrackEval()
-    evaluator.evaluate(pred_file, gt_file, id_field='primary_uuid', mark_id=1)
+    evaluator.evaluate(pred_file, gt_file, id_field='identity_id', mark_id=1)
     results = evaluator.get_result()
 
     print("\n2. Running Visualization...")
@@ -43,8 +43,8 @@ def run_demo_mode():
     os.makedirs(output_dir, exist_ok=True)
 
     visualizer = Visualizer()
-    print(f"Note: Visualization requires actual image files.")
-    print(f"Results would be saved to: {output_dir}")
+    visualizer.visualize(pred_file, output_dir=output_dir, id_field='identity_id')
+    print(f"Visualization frames saved to: {output_dir}")
 
     print("\n3. Summary")
     print("-" * 40)

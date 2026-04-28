@@ -15,7 +15,7 @@ def main():
     parser.add_argument('--gt_file', type=str,
                         default='data/sample_csv/sample_gt.csv',
                         help='Ground truth file')
-    parser.add_argument('--id_field', type=str, default='primary_uuid',
+    parser.add_argument('--id_field', type=str, default='identity_id',
                         help='ID field name')
     parser.add_argument('--output', type=str, default='results/metrics/eval_results.txt',
                         help='Output file for results')
@@ -41,9 +41,11 @@ def main():
     os.makedirs(os.path.dirname(args.output), exist_ok=True)
     with open(args.output, 'w') as f:
         f.write(f"IDF1: {results['IDF1']}\n")
+        f.write(f"IDP: {results['IDP']}\n")
+        f.write(f"IDR: {results['IDR']}\n")
         f.write(f"MOTA: {results['MOTA']}\n")
         f.write(f"ID Switches: {results['IDs']}\n")
-        f.write(f"Ground Truth Objects: {results['GTs']}\n")
+        f.write(f"Ground Truth Detections: {results['GTs']}\n")
 
     print(f"\nResults saved to: {args.output}")
 
