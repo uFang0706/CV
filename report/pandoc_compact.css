@@ -1,23 +1,23 @@
-@page { size: A4; margin: 11mm 12mm; }
+@page { size: A4; margin: 10mm 11mm; }
 html, body { margin: 0; padding: 0; }
 body {
   font-family: "STHeiti", "PingFang SC", "Noto Sans CJK SC", sans-serif;
-  font-size: 9.9pt;
-  line-height: 1.28;
+  font-size: 9.8pt;
+  line-height: 1.24;
   max-width: none;
 }
-h1 { font-size: 16pt; margin: 0.85em 0 0.42em; }
-h2 { font-size: 12.8pt; margin: 0.72em 0 0.34em; }
-h3 { font-size: 11pt; margin: 0.5em 0 0.25em; }
-p { margin: 0.34em 0; }
-ul, ol { margin-top: 0.24em; margin-bottom: 0.24em; }
-figure { margin: 0.62em auto 0.72em; text-align: center; page-break-inside: avoid; }
-figcaption { font-size: 8.6pt; line-height: 1.18; margin-top: 0.22em; }
-img { max-height: 52mm; object-fit: contain; }
-figure img { width: auto; max-width: 100%; }
-table { font-size: 9pt; border-collapse: collapse; margin: 0.5em auto; page-break-inside: avoid; }
-th, td { padding: 2px 5px; }
-.math { font-size: 10pt; }
-.title { font-size: 18pt; line-height: 1.2; margin-bottom: 0.25em; }
-.author, .date { font-size: 10.5pt; margin: 0.06em; }
-.abstract { font-size: 9.4pt; line-height: 1.23; }
+h1 { font-size: 16pt; margin: 0.75em 0 0.34em; }
+h2 { font-size: 12.5pt; margin: 0.62em 0 0.28em; }
+h3 { font-size: 10.8pt; margin: 0.44em 0 0.20em; }
+p { margin: 0.28em 0; }
+ul, ol { margin-top: 0.22em; margin-bottom: 0.22em; }
+figure { margin: 0.48em auto 0.56em; text-align: center; page-break-inside: avoid; }
+figcaption { font-size: 8.3pt; line-height: 1.12; margin-top: 0.18em; }
+img { max-height: 43mm !important; width: auto !important; object-fit: contain; }
+figure img { max-width: 100% !important; }
+table { font-size: 8.7pt; border-collapse: collapse; margin: 0.42em auto; page-break-inside: avoid; }
+th, td { padding: 2px 4px; }
+.math { font-size: 9.5pt; }
+.title { font-size: 17.5pt; line-height: 1.15; margin-bottom: 0.20em; }
+.author, .date { font-size: 10pt; margin: 0.04em; }
+.abstract { font-size: 9.1pt; line-height: 1.18; }

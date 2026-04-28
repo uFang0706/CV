@@ -297,54 +297,109 @@ def generate_iou_vs_biou():
     print(f"  -> Saved: report/figures/iou_vs_biou.{IMG_FORMAT}")
 
 def generate_wuzhou_dataset_composition():
-    """Wuzhou数据集组成"""
+    """Wuzhou数据集组成：横向低高度信息图，避免四宫格显得像模板截图。"""
     print("Generating: wuzhou_dataset_composition.png")
 
-    frames = ['frame_0050.png', 'frame_0300.png', 'frame_0750.png', 'frame_1500.png']
-
-    fig, axes = plt.subplots(2, 2, figsize=(12, 10))
-    for i, frame_name in enumerate(frames):
-        row, col = i // 2, i % 2
-        img = load_frame(frame_name)
+    gt_df = load_gt()
+    frame_ids = [50, 500, 1000, 1500, 2000]
+    imgs = []
+    for fid in frame_ids:
+        img = load_frame(f'frame_{fid:04d}.png')
         if img is not None:
-            img_h, img_w = img.shape[:2]
-            scale = min(300 / img_w, 200 / img_h)
-            img_small = cv2.resize(img, (int(img_w * scale), int(img_h * scale)))
-            axes[row, col].imshow(img_small)
-        axes[row, col].set_title(f'Frame {frames.index(frame_name) * 250 + 50}', fontsize=10)
-        axes[row, col].axis('off')
+            img = cv2.resize(img, (260, 146))
+        else:
+            img = np.ones((146, 260, 3), dtype=np.uint8) * 245
+        imgs.append(img)
 
-    plt.suptitle('Wuzhou_MidRoad Dataset: Multiple Scenes\n(2475 frames, 117 identities, 33846 annotations)', fontsize=14, fontweight='bold')
-    plt.tight_layout()
-    plt.savefig(f'report/figures/wuzhou_dataset_composition.{IMG_FORMAT}', format=IMG_FORMAT, dpi=DPI, bbox_inches='tight')
+    fig = plt.figure(figsize=(15.5, 3.25), facecolor='white')
+    gs = fig.add_gridspec(2, 6, width_ratios=[1, 1, 1, 1, 1, 1.15], height_ratios=[1.35, 0.9],
+                          wspace=0.10, hspace=0.22)
+    axes = [fig.add_subplot(gs[0, i]) for i in range(5)]
+    ax_stats = fig.add_subplot(gs[0, 5])
+    ax_timeline = fig.add_subplot(gs[1, :])
+
+    for ax, fid, img in zip(axes, frame_ids, imgs):
+        ax.imshow(img)
+        ax.set_title(f'Frame {fid}', fontsize=9, fontweight='bold', pad=2)
+        ax.axis('off')
+
+    ax_stats.axis('off')
+    stats = [('Frames', '2475'), ('IDs', '117'), ('GT boxes', '33846'), ('Duration', '≈99s')]
+    for i, (k, v) in enumerate(stats):
+        y = 0.88 - i * 0.22
+        ax_stats.add_patch(patches.FancyBboxPatch((0.04, y-0.14), 0.92, 0.16, transform=ax_stats.transAxes,
+                                                  boxstyle='round,pad=0.025', facecolor='#F8FAFC',
+                                                  edgecolor='#CBD5E1', linewidth=1.0))
+        ax_stats.text(0.10, y-0.06, k, transform=ax_stats.transAxes, fontsize=8.5,
+                      color='#64748B', va='center', fontweight='bold')
+        ax_stats.text(0.92, y-0.06, v, transform=ax_stats.transAxes, fontsize=12,
+                      color='#0F172A', va='center', ha='right', fontweight='bold')
+
+    ax_timeline.set_xlim(0, 2475)
+    ax_timeline.set_ylim(0, 1)
+    ax_timeline.axis('off')
+    ax_timeline.hlines(0.55, 0, 2475, color='#CBD5E1', lw=8, alpha=0.8)
+    ax_timeline.hlines(0.55, 0, 2475, color='#2563EB', lw=4, alpha=0.95)
+    for fid in frame_ids:
+        ax_timeline.scatter([fid], [0.55], s=115, color='white', edgecolor='#2563EB', linewidth=2.1, zorder=3)
+        ax_timeline.text(fid, 0.18, str(fid), ha='center', fontsize=8.5, color='#334155')
+    if gt_df is not None:
+        per_frame = gt_df.groupby('frame').size()
+        xs = per_frame.index.values
+        ys = per_frame.values.astype(float)
+        ys = 0.64 + 0.25 * (ys - ys.min()) / max(1, ys.max() - ys.min())
+        ax_timeline.plot(xs, ys, color='#F97316', lw=1.2, alpha=0.8)
+        ax_timeline.text(2440, 0.88, 'GT density', ha='right', fontsize=8.5, color='#EA580C', fontweight='bold')
+    ax_timeline.text(0, 0.94, 'Wuzhou_MidRoad self-annotated sequence overview',
+                     fontsize=11.5, fontweight='bold', color='#0F172A')
+    ax_timeline.text(0, 0.04, 'sampled real frames + annotation density timeline',
+                     fontsize=8.5, color='#64748B')
+
+    plt.savefig(f'report/figures/wuzhou_dataset_composition.{IMG_FORMAT}', format=IMG_FORMAT, dpi=DPI,
+                bbox_inches='tight', facecolor='white')
     plt.close()
     print(f"  -> Saved: report/figures/wuzhou_dataset_composition.{IMG_FORMAT}")
 
-
 def generate_wuzhou_trajectory_map():
-    """Wuzhou轨迹空间分布：不使用视频底图，只画GT中心点轨迹。"""
+    """Wuzhou轨迹空间分布：宽幅低高度，展示轨迹热度和主方向。"""
     print("Generating: wuzhou_trajectory_map.png")
 
     gt_df = load_gt()
-    fig, ax = plt.subplots(figsize=(10, 7))
+    fig, (ax, ax_hist) = plt.subplots(1, 2, figsize=(15.5, 3.8), gridspec_kw={'width_ratios':[3.1, 1.0]}, facecolor='white')
     if gt_df is not None and len(gt_df) > 0:
-        ids = gt_df.groupby('id').size().sort_values(ascending=False).head(12).index
-        cmap = plt.cm.get_cmap('tab20', len(ids))
+        centers_x = gt_df['x'] + gt_df['w'] / 2
+        centers_y = gt_df['y'] + gt_df['h'] / 2
+        h = ax.hist2d(centers_x, centers_y, bins=[90, 45], cmap='magma', cmin=1, alpha=0.92)
+        ids = gt_df.groupby('id').size().sort_values(ascending=False).head(10).index
+        cmap = plt.cm.get_cmap('turbo', len(ids))
         for idx, track_id in enumerate(ids):
-            d = gt_df[gt_df['id'] == track_id].sort_values('frame').iloc[::max(1, len(gt_df[gt_df['id'] == track_id])//80)]
+            d0 = gt_df[gt_df['id'] == track_id].sort_values('frame')
+            d = d0.iloc[::max(1, len(d0)//70)]
             cx = d['x'] + d['w'] / 2
             cy = d['y'] + d['h'] / 2
-            ax.plot(cx, cy, '-', lw=1.4, color=cmap(idx), alpha=0.85)
-            ax.scatter(cx.iloc[0], cy.iloc[0], s=18, marker='o', color=cmap(idx))
-            ax.scatter(cx.iloc[-1], cy.iloc[-1], s=28, marker='>', color=cmap(idx))
-        ax.invert_yaxis()
-        ax.set_xlabel('Center x (pixels)')
-        ax.set_ylabel('Center y (pixels)')
-        ax.grid(True, alpha=0.25)
-    ax.set_title('Wuzhou_MidRoad Self-annotated GT Trajectory Map\n(no video background; top long tracks)',
-                 fontsize=14, fontweight='bold')
+            ax.plot(cx, cy, '-', lw=1.5, color=cmap(idx), alpha=0.80)
+            ax.scatter(cx.iloc[0], cy.iloc[0], s=18, marker='o', color=cmap(idx), edgecolor='white', linewidth=0.5)
+            ax.scatter(cx.iloc[-1], cy.iloc[-1], s=28, marker='>', color=cmap(idx), edgecolor='white', linewidth=0.5)
+        ax.set_xlim(0, 1920)
+        ax.set_ylim(1080, 0)
+        ax.set_xlabel('Image x coordinate (px)')
+        ax.set_ylabel('Image y coordinate (px)')
+        ax.set_title('Spatial trajectory density + top long tracks (GT centers)', fontsize=11.5, fontweight='bold')
+        ax.grid(True, alpha=0.15, color='white')
+
+        durations = gt_df.groupby('id').size().sort_values(ascending=False).head(14).sort_values()
+        ax_hist.barh([str(i) for i in durations.index], durations.values, color='#2563EB', alpha=0.82)
+        ax_hist.set_title('Longest IDs\n(frames)', fontsize=10.5, fontweight='bold')
+        ax_hist.set_xlabel('frames')
+        ax_hist.grid(True, axis='x', alpha=0.22)
+        ax_hist.spines[['top','right']].set_visible(False)
+    else:
+        ax.axis('off'); ax_hist.axis('off')
+    fig.suptitle('Wuzhou_MidRoad Route Analysis: where identities appear, move and stay',
+                 fontsize=13, fontweight='bold', y=1.02)
     plt.tight_layout()
-    plt.savefig(f'report/figures/wuzhou_trajectory_map.{IMG_FORMAT}', format=IMG_FORMAT, dpi=DPI, bbox_inches='tight')
+    plt.savefig(f'report/figures/wuzhou_trajectory_map.{IMG_FORMAT}', format=IMG_FORMAT, dpi=DPI,
+                bbox_inches='tight', facecolor='white')
     plt.close()
     print(f"  -> Saved: report/figures/wuzhou_trajectory_map.{IMG_FORMAT}")
 
@@ -518,45 +573,60 @@ def generate_iteration_ablation_curve():
 
 
 def generate_wuzhou_metric_dashboard():
-    """Wuzhou指标仪表盘"""
+    """Wuzhou指标仪表盘：宽幅低高度 KPI + error decomposition。"""
     print("Generating: wuzhou_metric_dashboard.png")
 
-    metrics = {
-        'IDF1': 73.26,
-        'IDP': 94.01,
-        'IDR': 60.01,
-        'MOTA': 55.49
-    }
+    metrics = [('IDF1', 73.26, '#2563EB'), ('IDP', 94.01, '#059669'), ('IDR', 60.01, '#F97316'), ('MOTA', 55.49, '#DC2626')]
+    errors = [('TP', 20310, '#16A34A'), ('FP', 1293, '#F59E0B'), ('FN', 13536, '#EF4444'), ('IDs', 236, '#7C3AED')]
 
-    fig, axes = plt.subplots(2, 2, figsize=(12, 10))
-    colors = ['#2196F3', '#4CAF50', '#FF9800', '#F44336']
+    fig = plt.figure(figsize=(15.5, 3.45), facecolor='white')
+    gs = fig.add_gridspec(2, 5, height_ratios=[1.0, 1.15], width_ratios=[1,1,1,1,1.25], wspace=0.18, hspace=0.35)
+    card_axes = [fig.add_subplot(gs[0, i]) for i in range(4)]
+    ax_err = fig.add_subplot(gs[:, 4])
+    ax_strip = fig.add_subplot(gs[1, :4])
 
-    for idx, (metric, value) in enumerate(metrics.items()):
-        row, col = idx // 2, idx % 2
-        ax = axes[row, col]
+    for ax, (name, value, color) in zip(card_axes, metrics):
+        ax.axis('off')
+        ax.add_patch(patches.FancyBboxPatch((0.03,0.10),0.94,0.78, transform=ax.transAxes,
+                                            boxstyle='round,pad=0.035', facecolor='#F8FAFC',
+                                            edgecolor='#CBD5E1', linewidth=1.1))
+        ax.text(0.10, 0.67, name, transform=ax.transAxes, fontsize=10, color='#64748B', fontweight='bold')
+        ax.text(0.10, 0.34, f'{value:.2f}%', transform=ax.transAxes, fontsize=19, color=color, fontweight='bold')
+        ax.add_patch(patches.Rectangle((0.10,0.18),0.78,0.055, transform=ax.transAxes,
+                                       facecolor='#E2E8F0', edgecolor='none'))
+        ax.add_patch(patches.Rectangle((0.10,0.18),0.78*value/100,0.055, transform=ax.transAxes,
+                                       facecolor=color, edgecolor='none'))
 
-        if 'ID' in metric:
-            bar = ax.bar([metric], [value], color=colors[idx], alpha=0.8)
-            ax.set_ylim(0, 110)
-            ax.set_ylabel('Percentage (%)', fontsize=10)
-            ax.text(0, value + 3, f'{value:.1f}%', ha='center', fontsize=14, fontweight='bold')
-        else:
-            bar = ax.bar([metric], [value], color=colors[idx], alpha=0.8)
-            ax.set_ylim(0, 110)
-            ax.set_ylabel('Percentage (%)', fontsize=10)
-            ax.text(0, value + 3, f'{value:.1f}%', ha='center', fontsize=14, fontweight='bold')
+    ax_strip.set_xlim(0, 100)
+    ax_strip.set_ylim(0, 1)
+    ax_strip.axis('off')
+    idp = 94.01; idr = 60.01
+    ax_strip.add_patch(patches.FancyBboxPatch((0.0,0.18),1.0,0.62, transform=ax_strip.transAxes,
+                                             boxstyle='round,pad=0.025', facecolor='#FFFFFF',
+                                             edgecolor='#CBD5E1', linewidth=1.0))
+    ax_strip.text(0.02, 0.68, 'Interpretation', transform=ax_strip.transAxes, fontsize=9.5, fontweight='bold', color='#0F172A')
+    ax_strip.text(0.02, 0.43, 'High IDP means matched identities are mostly reliable; lower IDR and large FN show recall/occlusion is the main bottleneck.',
+                  transform=ax_strip.transAxes, fontsize=8.6, color='#334155')
+    ax_strip.text(0.02, 0.23, f'Precision--recall gap: IDP {idp:.2f}% vs IDR {idr:.2f}% → tracking is conservative rather than noisy.',
+                  transform=ax_strip.transAxes, fontsize=8.6, color='#334155')
 
-        ax.set_title(f'{metric}', fontsize=12, fontweight='bold')
-        ax.axhline(y=50, color='gray', linestyle='--', alpha=0.5)
+    labels = [e[0] for e in errors]
+    vals = [e[1] for e in errors]
+    cols = [e[2] for e in errors]
+    ypos = np.arange(len(labels))
+    ax_err.barh(ypos, vals, color=cols, alpha=0.86)
+    ax_err.set_yticks(ypos, labels)
+    ax_err.invert_yaxis()
+    ax_err.set_title('Error / match counts', fontsize=10.5, fontweight='bold')
+    ax_err.grid(True, axis='x', alpha=0.22)
+    ax_err.spines[['top','right']].set_visible(False)
+    for y, v in zip(ypos, vals):
+        ax_err.text(v + max(vals)*0.015, y, f'{v}', va='center', fontsize=8.5, color='#334155')
 
-    axes[0, 0].set_title('IDF1: Identity F1 Score (73.26%)', fontsize=11, fontweight='bold', color='#2196F3')
-    axes[0, 1].set_title('IDP: Identity Precision (94.01%)', fontsize=11, fontweight='bold', color='#4CAF50')
-    axes[1, 0].set_title('IDR: Identity Recall (60.01%)', fontsize=11, fontweight='bold', color='#FF9800')
-    axes[1, 1].set_title('MOTA: Multi-Object Tracking Accuracy (55.49%)', fontsize=11, fontweight='bold', color='#F44336')
-
-    plt.suptitle('Wuzhou_MidRoad Real Scene Evaluation Metrics\nID Switches: 236 | TP: 20310 | FP: 1293 | FN: 13536', fontsize=14, fontweight='bold')
+    fig.suptitle('Wuzhou_MidRoad Real-scene Evaluation Dashboard', fontsize=13, fontweight='bold', y=1.02)
     plt.tight_layout()
-    plt.savefig(f'report/figures/wuzhou_metric_dashboard.{IMG_FORMAT}', format=IMG_FORMAT, dpi=DPI, bbox_inches='tight')
+    plt.savefig(f'report/figures/wuzhou_metric_dashboard.{IMG_FORMAT}', format=IMG_FORMAT, dpi=DPI,
+                bbox_inches='tight', facecolor='white')
     plt.close()
     print(f"  -> Saved: report/figures/wuzhou_metric_dashboard.{IMG_FORMAT}")
 
