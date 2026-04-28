@@ -122,6 +122,18 @@ IoU 直接比较预测框与检测框的交并比；BIoU（Buffered IoU）则在
 
 需要说明的是，当前仓库中的 Demo 消融可以直接复现 V0--V3 的指标；真实 Wuzhou 场景目前已有完整最终版本评估结果，但若要在真实场景上给出严格的 V0--V4 全部对照，需要继续导出每个中间版本的 tracker 文件。本文已经提供统一评估脚本，后续只需将不同版本的结果保存为 MOT 格式 txt，即可得到真实场景的完整消融表。
 
+\subsection{ReID 模型训练设置}
+外观分支使用 OSNet-AIN / MobileNet Hybrid 作为 ReID 特征提取模型，并在 Market1501 与 MSMT17 行人重识别数据上进行训练。训练采用 SGD 优化器和 Cosine Annealing 学习率调度，batch size 为 32，输入图像尺寸为 $256\times128$。训练日志保存在 \texttt{original\_project/run\_logs/reid\_training\_log.txt}，共记录 178 个 epoch，最佳 checkpoint 出现在 epoch 178，验证 mAP 为 0.6272。图\ref{fig:train} 根据该日志直接绘制，展示了训练损失下降、学习率衰减和验证 mAP 提升过程。
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.86\linewidth]{figures/training_curve_reid.png}
+    \caption{ReID 模型训练曲线。曲线由 \texttt{reid\_training\_log.txt} 解析生成，最佳验证 mAP 为 0.6272。}
+    \label{fig:train}
+\end{figure}
+
+需要说明的是，ReID 任务通常报告 mAP 与 Rank-1/Rank-5 等指标。当前日志记录了训练 loss、学习率和验证 mAP，可用于说明外观分支训练过程；后续若补充 Rank-1 或 CMC 曲线，可进一步增强模型训练部分的完整性。
+
 \subsection{评价指标}
 本文采用 MOT 常用指标。IDP 表示身份匹配精确率，IDR 表示身份匹配召回率，IDF1 是二者的调和平均；MOTA 综合考虑漏检、误检和身份切换；ID Switches 表示同一 GT 身份在时间上被分配到不同预测 ID 的次数。评价脚本使用匈牙利算法在每帧内按 IoU 阈值匹配 GT 与预测框，并累计 TP、FP、FN 和身份切换次数。
 
@@ -186,9 +198,9 @@ Wuzhou\_MidRoad & 73.26 & 94.01 & 60.01 & 55.49 & 236 & 20310 & 1293 & 13536 \\
 \end{figure}
 
 \section{实现细节与可复现性}
-项目代码围绕可复现课程评阅进行组织。\texttt{src/evaluation/metric.py} 实现 MOT 风格的逐帧匹配、IDF1/MOTA/TP/FP/FN 统计；\texttt{src/tracking/tracker.py} 实现 Kalman 状态预测、轨迹更新和外观特征平滑；\texttt{src/cropping/crop\_strategy.py} 实现标准框裁剪和姿态感知裁剪；\texttt{scripts/run\_experiments.py} 复现 Demo 消融实验；\texttt{scripts/run\_original\_project.py} 复现 Wuzhou 真实场景评估；新增的 \texttt{scripts/generate\_method\_figures.py} 与 \texttt{scripts/generate\_real\_data\_figures.py} 用于生成本文图表。
+项目代码围绕可复现课程评阅进行组织。\texttt{src/evaluation/metric.py} 实现 MOT 风格的逐帧匹配、IDF1/MOTA/TP/FP/FN 统计；\texttt{src/tracking/tracker.py} 实现 Kalman 状态预测、轨迹更新和外观特征平滑；\texttt{src/cropping/crop\_strategy.py} 实现标准框裁剪和姿态感知裁剪；\texttt{scripts/run\_experiments.py} 复现 Demo 消融实验；\texttt{scripts/run\_original\_project.py} 复现 Wuzhou 真实场景评估；\texttt{scripts/generate\_training\_curve.py} 从训练日志重绘 ReID 训练曲线；\texttt{scripts/generate\_enhanced\_figures.py} 可从视频自动抽帧并生成真实背景配图。
 
-若后续补充模型训练日志，可进一步加入训练损失曲线，如 detector loss、ReID triplet/classification loss 或 validation IDF1 曲线。本文当前没有在报告中伪造训练损失，而是将重点放在已能由仓库脚本复现的跟踪评估、消融和真实场景验证上。
+所有核心结果均可通过脚本重新生成。Demo 指标来自 \texttt{scripts/run\_experiments.py --exp all}，真实场景指标来自 \texttt{scripts/run\_original\_project.py --exp wuzhou}，训练曲线来自 \texttt{original\_project/run\_logs/reid\_training\_log.txt}。这种组织方式使评阅者既可以查看最终 PDF，也可以回到代码和日志复查每张图、每个指标的来源。
 
 \section{总结与展望}
 本文完成了一个运动--外观双分支的多目标行人跟踪课程项目，并通过双层实验设计突出工作量：公开 MOT 层体现标准评测协议理解，自标注 Wuzhou\_MidRoad 层体现真实数据构建和实践验证。方法上，本文解释了为什么需要 Kalman 滤波、匈牙利匹配、ReID 外观分支、姿态裁剪、低置信度搜索扩展和 BIoU 匹配。实验上，Demo 消融展示了从 Baseline 到优化版本的迭代过程，真实场景评估进一步揭示了密集遮挡条件下的召回和身份切换问题。

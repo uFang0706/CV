@@ -10,6 +10,7 @@ import matplotlib.patches as patches
 import numpy as np
 import os
 import pandas as pd
+from pathlib import Path
 
 plt.rcParams['font.size'] = 10
 plt.rcParams['axes.unicode_minus'] = False
@@ -18,10 +19,68 @@ os.makedirs('report/figures', exist_ok=True)
 IMG_FORMAT = 'png'
 DPI = 150
 FRAMES_DIR = 'report/figures/frames'
+VIDEO_PATH = 'original_project/test_videos/Wuzhou_MidRoad/Wuzhou_MidRoad.mp4'
+GT_PATH = 'original_project/test_videos/Wuzhou_MidRoad/gt.txt'
+
+
+def extract_key_frames_if_needed(
+    video_path=VIDEO_PATH,
+    gt_file=GT_PATH,
+    output_dir=FRAMES_DIR,
+    intervals=(50, 150, 300, 500, 750, 1000, 1250, 1500, 1750, 2000),
+):
+    """确保真实背景帧存在；缺失时直接从仓库内 mp4 抽取。"""
+    output = Path(output_dir)
+    required = [output / f"frame_{idx:04d}.png" for idx in intervals]
+    required.append(output / "tracking_frame_0300.png")
+    if all(path.exists() for path in required):
+        return
+
+    if not Path(video_path).exists():
+        print(f"Warning: video not found, enhanced figures may fallback to gray background: {video_path}")
+        return
+
+    output.mkdir(parents=True, exist_ok=True)
+    cap = cv2.VideoCapture(video_path)
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    print(f"Auto-extracting frames from {video_path} ({total_frames} frames)")
+
+    for frame_idx in intervals:
+        out_path = output / f"frame_{frame_idx:04d}.png"
+        if out_path.exists() or frame_idx >= total_frames:
+            continue
+        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+        ret, frame = cap.read()
+        if ret:
+            cv2.imwrite(str(out_path), frame)
+            print(f"  extracted frame {frame_idx} -> {out_path}")
+
+    if Path(gt_file).exists():
+        track_out = output / "tracking_frame_0300.png"
+        if not track_out.exists():
+            cap.set(cv2.CAP_PROP_POS_FRAMES, 300)
+            ret, frame = cap.read()
+            if ret:
+                gt_df = pd.read_csv(gt_file, names=['frame', 'id', 'x', 'y', 'w', 'h', 'c', 'c2', 'c3'])
+                frame_gt = gt_df[gt_df['frame'] == 301]
+                colors = [
+                    (255, 0, 0), (0, 255, 0), (0, 0, 255),
+                    (255, 255, 0), (255, 0, 255), (0, 255, 255)
+                ]
+                for _, row in frame_gt.iterrows():
+                    x, y, w, h = int(row['x']), int(row['y']), int(row['w']), int(row['h'])
+                    track_id = int(row['id'])
+                    color = colors[track_id % len(colors)]
+                    cv2.rectangle(frame, (x, y), (x + w, y + h), color, 2)
+                    cv2.putText(frame, f"ID:{track_id}", (x, max(0, y - 5)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+                cv2.imwrite(str(track_out), frame)
+                print(f"  extracted tracking frame -> {track_out}")
+    cap.release()
 
 
 def load_frame(frame_name):
     """加载帧图像"""
+    extract_key_frames_if_needed()
     path = os.path.join(FRAMES_DIR, frame_name)
     if not os.path.exists(path):
         print(f"Warning: Frame not found: {path}")
@@ -109,7 +168,7 @@ def generate_kalman_hungarian_example():
     ax.set_title('Kalman Prediction & Hungarian Matching\n(Real Surveillance Frame)', fontsize=14, fontweight='bold')
     ax.axis('off')
 
-    textstr = 'Frame 300: Multiple pedestrians crossing\nGreen=ID1, Red=ID2, Yellow=ID3\nKalman predicts next position\nHungarian matches globally'
+    textstr = 'Frame 300: Multiple pedestrians crossing\nGreen=ID1, Red=ID2, Cyan=ID3\nKalman predicts next position\nHungarian matches globally'
     props = dict(boxstyle='round', facecolor='white', alpha=0.9)
     ax.text(0.02, 0.98, textstr, transform=ax.transAxes, fontsize=10,
            verticalalignment='top', bbox=props)
