@@ -1,13 +1,15 @@
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 import numpy as np
-from matplotlib.backends.backend_pdf import PdfPages
 import os
 
 os.makedirs('report/figures', exist_ok=True)
 
 plt.rcParams['font.size'] = 10
 plt.rcParams['axes.unicode_minus'] = False
+
+IMG_FORMAT = 'png'
+DPI = 150
 
 def generate_system_architecture():
     fig, ax = plt.subplots(1, 1, figsize=(12, 8))
@@ -65,15 +67,13 @@ def generate_system_architecture():
                bbox=dict(boxstyle='round', facecolor='white', edgecolor=color, alpha=0.8))
 
     plt.tight_layout()
-    plt.savefig('report/figures/system_architecture.pdf', format='pdf', dpi=300, bbox_inches='tight')
+    plt.savefig(f'report/figures/system_architecture.{IMG_FORMAT}', format=IMG_FORMAT, dpi=DPI, bbox_inches='tight')
     plt.close()
-    print("Generated: report/figures/system_architecture.pdf")
+    print(f"Generated: report/figures/system_architecture.{IMG_FORMAT}")
 
 
 def generate_cropping_comparison():
     fig, axes = plt.subplots(1, 3, figsize=(14, 5))
-
-    img1 = np.random.rand(200, 200, 3) * 0.3 + 0.7
 
     for i, ax in enumerate(axes):
         ax.set_xlim(0, 10)
@@ -109,9 +109,9 @@ def generate_cropping_comparison():
                ha='center', fontsize=9, style='italic')
 
     plt.tight_layout()
-    plt.savefig('report/figures/cropping_comparison.pdf', format='pdf', dpi=300, bbox_inches='tight')
+    plt.savefig(f'report/figures/cropping_comparison.{IMG_FORMAT}', format=IMG_FORMAT, dpi=DPI, bbox_inches='tight')
     plt.close()
-    print("Generated: report/figures/cropping_comparison.pdf")
+    print(f"Generated: report/figures/cropping_comparison.{IMG_FORMAT}")
 
 
 def generate_tracking_comparison():
@@ -144,9 +144,9 @@ def generate_tracking_comparison():
     ax2.legend()
 
     plt.tight_layout()
-    plt.savefig('report/figures/tracking_comparison.pdf', format='pdf', dpi=300, bbox_inches='tight')
+    plt.savefig(f'report/figures/tracking_comparison.{IMG_FORMAT}', format=IMG_FORMAT, dpi=DPI, bbox_inches='tight')
     plt.close()
-    print("Generated: report/figures/tracking_comparison.pdf")
+    print(f"Generated: report/figures/tracking_comparison.{IMG_FORMAT}")
 
 
 def generate_tracking_visualization():
@@ -192,9 +192,9 @@ def generate_tracking_visualization():
            ha='center', fontsize=10, style='italic')
 
     plt.tight_layout()
-    plt.savefig('report/figures/tracking_visualization.pdf', format='pdf', dpi=300, bbox_inches='tight')
+    plt.savefig(f'report/figures/tracking_visualization.{IMG_FORMAT}', format=IMG_FORMAT, dpi=DPI, bbox_inches='tight')
     plt.close()
-    print("Generated: report/figures/tracking_visualization.pdf")
+    print(f"Generated: report/figures/tracking_visualization.{IMG_FORMAT}")
 
 
 def generate_ablation_chart():
@@ -234,9 +234,9 @@ def generate_ablation_chart():
     ax.legend(lines1 + lines2, labels1 + labels2, loc='upper left')
 
     plt.tight_layout()
-    plt.savefig('report/figures/ablation_study.pdf', format='pdf', dpi=300, bbox_inches='tight')
+    plt.savefig(f'report/figures/ablation_study.{IMG_FORMAT}', format=IMG_FORMAT, dpi=DPI, bbox_inches='tight')
     plt.close()
-    print("Generated: report/figures/ablation_study.pdf")
+    print(f"Generated: report/figures/ablation_study.{IMG_FORMAT}")
 
 
 if __name__ == '__main__':
