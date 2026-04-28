@@ -1,5 +1,5 @@
 \documentclass[UTF8,a4paper,10pt]{ctexart}
-\usepackage[margin=1.55cm]{geometry}
+\usepackage[margin=1.22cm]{geometry}
 \usepackage{graphicx}
 \usepackage{booktabs}
 \usepackage{float}
@@ -8,143 +8,108 @@
 \usepackage{xcolor}
 \usepackage{enumitem}
 \usepackage{subcaption}
-\setlist{nosep,leftmargin=1.5em}
+\setlist{nosep,leftmargin=1.2em,itemsep=0pt,topsep=1pt}
 \hypersetup{colorlinks=true,linkcolor=black,citecolor=black,urlcolor=blue}
-\setlength{\parskip}{0.12em}
-\setlength{\parindent}{2em}
-\title{\textbf{面向密集公共场景的运动--外观双分支多目标行人跟踪系统设计与实验分析}}
+\setlength{\parskip}{0.03em}
+\setlength{\parindent}{1.6em}
+\renewcommand{\baselinestretch}{0.94}
+\captionsetup{font=small,skip=2pt}
+\title{\vspace{-1.1em}\textbf{面向密集公共场景的运动--外观双分支多目标行人跟踪系统设计与实验分析}\vspace{-0.8em}}
 \author{方瑜}
-\date{2026年4月}
+\date{2026年4月\vspace{-1.3em}}
 
 \begin{document}
 \maketitle
-\vspace{-1.9em}
+\vspace{-2.0em}
 
 \begin{abstract}
-多目标行人跟踪（Multi-Object Tracking, MOT）不仅需要检测每一帧中的行人位置，还需要在遮挡、交叉行走和检测框抖动情况下维持身份编号一致。本文围绕密集公共场景下的身份保持问题，设计并实现了一个运动--外观双分支的行人跟踪实验系统：运动分支利用 Kalman 滤波预测短时位置变化，外观分支利用 ReID 特征刻画行人身份，二者通过代价矩阵融合和匈牙利算法完成全局一对一关联。为了体现从课程 Demo 到真实验证的完整过程，本文采用双层实验设计：第一层使用 MOT17/MOT20 公开数据格式和评测协议进行标准任务对齐；第二层构建 Wuzhou\_MidRoad 真实场景自标注验证集，将本人标注/核验后的 \texttt{gt.txt} 作为 Ground Truth，与跟踪结果进行逐帧匹配评估。实验包含 Baseline、Kalman、ReID、姿态裁剪和低置信度目标搜索扩展等迭代模块，展示了从简单 IoU 关联到运动--外观融合的优化过程。结果表明，姿态感知裁剪和外观特征可显著改善 Demo 设置中的身份保持；在真实场景中，系统取得 IDF1 73.26\%、MOTA 55.49\%、ID Switches 236 的结果，主要误差来自遮挡和漏检。
+多目标行人跟踪（MOT）的关键不仅是检测行人位置，还要在遮挡、交叉和检测抖动时维持身份编号一致。本文实现了一个面向密集公共场景的运动--外观双分支跟踪系统：运动分支使用 Kalman 滤波预测短时位置，外观分支使用 ReID 特征描述行人身份，二者融合后由匈牙利算法完成全局一对一匹配。实验采用双层设计：一层对齐 MOT17/MOT20 的标准格式与评测协议，另一层构建 Wuzhou\_MidRoad 自标注真实验证集（2474 帧、117 个 ID、33846 个标注框）。系统从 Baseline、Kalman、ReID、姿态裁剪到 BIoU/低置信度扩展逐步迭代；最终在真实场景上取得 IDF1 73.26\%、MOTA 55.49\%、ID Switches 236。报告同时给出 ReID 训练日志曲线、消融结果和误差分析，以体现课程项目的算法设计、数据构建和复现完整性。
 \end{abstract}
-
+\vspace{-0.4em}
 \noindent\textbf{关键词：}多目标跟踪；ReID；Kalman 滤波；匈牙利匹配；BIoU；自标注验证集
 
-\section{项目背景与问题定义}
-密集公共场景中的行人跟踪难点不只是“检测到人”，而是“持续确认同一个人”。当目标被遮挡、多人交叉、检测置信度下降或边界框偏移时，单纯依赖单帧检测或最近邻匹配容易造成 ID Switch。经典 SORT 使用 Kalman 滤波和匈牙利匹配实现高效在线关联\cite{sort}，DeepSORT 进一步引入 ReID 外观特征以提升遮挡后的身份恢复能力\cite{deepsort}。但在真实密集场景中，检测框经常包含背景、相邻行人或不完整身体区域，外观特征会受到污染，因此需要同时考虑运动连续性、外观相似性和裁剪质量。
+\section{问题定义与系统思路}
+密集公共场景中的行人跟踪难点是“持续确认同一个人”。若仅依赖单帧 IoU 或最近邻匹配，目标交叉后容易 ID Switch；若只使用外观特征，检测框包含背景或遮挡时 ReID 特征又会被污染。因此本文将任务拆成两个互补分支：运动分支负责短时连续性，外观分支负责身份一致性。整体流程为：检测框输入后，Kalman 滤波预测已有轨迹下一帧位置；ReID 网络提取检测框外观特征；再将运动代价与外观代价加权融合，最后由匈牙利算法求解全局最小代价匹配。
 
-本文的核心目标不是简单复现一个跟踪器，而是完成一个可解释、可运行、可评估的计算机视觉课程项目。具体工作包括：（1）实现 MOT 数据读取、评价指标、可视化和实验脚本；（2）解释 Kalman、匈牙利匹配、IoU/BIoU 和低置信度搜索扩展等设计选择；（3）构建公开 MOT 协议层与自标注真实验证层；（4）通过 Baseline 到优化版本的消融展示迭代过程。
-
-\section{系统设计：运动--外观双分支关联}
-\subsection{为什么使用 Kalman 滤波与匈牙利匹配}
-行人运动在短时间内具有连续性。若仅使用当前帧检测框进行匹配，目标短时遮挡后可能没有合适检测框，轨迹会被中断；若多人交叉，最近邻或局部贪心匹配可能把两个身份互换。因此本文采用 Kalman 滤波建立状态向量
+Kalman 状态向量设为
 \begin{equation}
-    \mathbf{x}=[c_x,c_y,a,h,\dot c_x,\dot c_y,\dot a,\dot h]^T,
+\mathbf{x}=[c_x,c_y,a,h,\dot c_x,\dot c_y,\dot a,\dot h]^T,
 \end{equation}
-其中 $(c_x,c_y)$ 表示框中心，$a$ 表示宽高比，$h$ 表示高度，后四维表示对应速度。该模型可以在当前检测不稳定时预测下一帧可能位置，为数据关联提供运动门控。
-
-匈牙利算法用于解决一帧中多条轨迹与多个检测框之间的一对一分配问题。与逐个选择最小距离的贪心策略相比，匈牙利匹配最小化全局总代价，可避免一个检测框被多个轨迹竞争或局部最优导致的身份交换。图\ref{fig:kh}展示了交叉场景下运动预测与全局匹配的作用。
-
-\begin{figure}[H]
-    \centering
-    \includegraphics[width=0.92\linewidth]{figures/kalman_hungarian_example.png}
-    \caption{Kalman 预测与匈牙利匹配在交叉场景中的作用。}
-    \label{fig:kh}
-\end{figure}
-
-\subsection{运动分支与外观分支的融合}
-本文将关联代价拆分为运动分支和外观分支。运动分支衡量预测框与检测框的空间重叠或距离，外观分支衡量 ReID 特征之间的余弦距离。最终代价可写为：
+其中 $(c_x,c_y)$ 为框中心，$a$ 为宽高比，$h$ 为高度，后四维为速度。关联总代价为
 \begin{equation}
-    C = \lambda C_{motion} + (1-\lambda)C_{app},
+C=\lambda C_{motion}+(1-\lambda)C_{app}.
 \end{equation}
-其中 $C_{motion}$ 适合处理短时连续运动，$C_{app}$ 适合处理遮挡后重新出现的身份识别。二者结合后，再用阈值门控去除明显不合理匹配，最后交给匈牙利算法求解。该设计体现了本文的主要创新点：\textbf{不是单独依赖 IoU，也不是单独依赖 ReID，而是将运动连续性和外观身份信息结合到同一个关联框架中。}
+$C_{motion}$ 约束短时位移，$C_{app}$ 约束外观身份。相比局部贪心匹配，匈牙利算法能保证每帧多轨迹、多检测框之间的一对一全局分配，避免一个检测框被多条轨迹竞争。
 
 \begin{figure}[H]
-    \centering
-    \includegraphics[width=0.92\linewidth]{figures/motion_appearance_fusion.png}
-    \caption{运动--外观双分支融合的关联流程。}
-    \label{fig:fusion}
+\centering
+\begin{subfigure}{0.48\linewidth}\centering
+\includegraphics[width=\linewidth]{figures/kalman_hungarian_example.png}
+\caption{Kalman 预测与匈牙利匹配。}
+\end{subfigure}\hfill
+\begin{subfigure}{0.48\linewidth}\centering
+\includegraphics[width=\linewidth]{figures/motion_appearance_fusion.png}
+\caption{运动--外观双分支融合。}
+\end{subfigure}
+\caption{系统核心设计：运动连续性与外观身份信息共同参与关联。}
+\label{fig:method}
 \end{figure}
 
-\subsection{低置信度目标与 IoU/BIoU 匹配}
-真实视频中，行人被遮挡或处于远距离时，检测器常给出低置信度且偏小的框。如果直接丢弃这类目标，IDR 和 MOTA 会下降；如果无条件保留，又会增加误匹配。因此本文采用更保守的策略：对低置信度目标不立即确认新轨迹，而是扩大搜索空间或关联门控，只允许其与已有轨迹进行补充匹配。这样做的直觉是：低置信检测虽然不适合直接创建可靠身份，但可能正是某条已有轨迹在遮挡后的弱响应。
-
-IoU 直接比较预测框与检测框的交并比；BIoU（Buffered IoU）则在匹配时对候选框或预测框边界做适度扩展，再计算重叠度。二者区别在于：IoU 更严格，适合高质量检测；BIoU 更宽容，适合低置信度、遮挡导致框偏小的情况。本文不是任意放大标注框，而是在关联阶段临时放大搜索区域，提高弱目标召回，同时仍通过代价阈值限制误匹配。
+\section{低置信度目标与 BIoU 关联}
+真实视频中，远距离行人或遮挡行人常产生低置信、小尺寸、偏移的检测框。直接丢弃会降低 IDR 和 MOTA；直接创建新轨迹又会引入误检。因此本文采用“低置信度补充匹配”策略：低置信目标不直接确认新 ID，而只允许与已有轨迹匹配。IoU 严格比较预测框与检测框交并比；BIoU（Buffered IoU）在关联阶段临时扩大预测框或候选框的搜索区域，适合检测框偏小、遮挡导致边界不准的情况。该扩展不是修改标注框，而是在匹配阶段提高弱目标召回，并继续通过门控阈值限制误匹配。
 
 \begin{figure}[H]
-    \centering
-    \begin{subfigure}{0.48\linewidth}
-        \centering
-        \includegraphics[width=\linewidth]{figures/low_confidence_search_expansion.png}
-        \caption{低置信度目标搜索空间扩展。}
-    \end{subfigure}
-    \hfill
-    \begin{subfigure}{0.48\linewidth}
-        \centering
-        \includegraphics[width=\linewidth]{figures/iou_vs_biou.png}
-        \caption{IoU 与 BIoU 匹配差异。}
-    \end{subfigure}
-    \caption{低置信度、遮挡目标的关联优化思路。}
-    \label{fig:lowconf}
+\centering
+\begin{subfigure}{0.48\linewidth}\centering
+\includegraphics[width=\linewidth]{figures/low_confidence_search_expansion.png}
+\caption{低置信度搜索空间扩展。}
+\end{subfigure}\hfill
+\begin{subfigure}{0.48\linewidth}\centering
+\includegraphics[width=\linewidth]{figures/iou_vs_biou.png}
+\caption{IoU 与 BIoU 区别。}
+\end{subfigure}
+\caption{低置信度、遮挡目标的关联优化。}
+\label{fig:biou}
 \end{figure}
 
-\section{双层实验数据设计}
-\subsection{第一层：公开 MOT 基准协议}
-第一层实验使用 MOT17/MOT20 的数据组织方式和 Ground Truth 格式，重点不是重新声称这些公开标注为本文原创，而是说明系统遵循标准 MOT 任务定义：每一行包含帧号、身份 ID、边界框位置和可见性等字段，评价时按帧进行检测框匹配并统计 IDF1、MOTA、ID Switches 等指标。这一层保证项目和公开 MOT 评测体系对齐。
+\section{双层实验数据与迭代设置}
+本文不只在合成 Demo 上展示效果，而是采用双层实验设计。第一层使用 MOT17/MOT20 的公开数据格式和评价协议，证明系统遵循标准 MOT 任务定义；第二层构建 Wuzhou\_MidRoad 真实场景验证集。该视频约 99 秒、2475 帧，本文将人工标注/核验后的 \texttt{gt.txt} 整理为 MOT 格式，其中包含 2474 帧、117 个行人身份和 33846 个标注框，并与跟踪器输出 \texttt{Wuzhou\_MidRoad.txt} 逐帧匹配评估。
 
-\subsection{第二层：自标注真实场景验证集}
-为了避免报告只停留在合成 Demo，本文进一步构建 Wuzhou\_MidRoad 真实场景验证集。该验证集来自一段约 99 秒、2475 帧的真实路口视频。本人对视频中的行人框和身份编号进行标注/核验，并整理为 MOT 格式的 \texttt{gt.txt}，其中包含 2474 帧、117 个行人身份和 33846 个标注框。该文件作为本文自建验证集的 Ground Truth，与 \texttt{original\_project/results/trackers/Wuzhou\_MidRoad.txt} 中的跟踪结果进行逐帧匹配评估。
+为体现课程项目的进步迭代，实验设置为五个版本：V0 只使用 IoU 关联；V1 加入 Kalman 运动预测；V2 加入 ReID 外观分支；V3 使用姿态感知裁剪减少背景干扰；V4 引入 BIoU 与低置信度目标搜索扩展，提高真实遮挡场景中的召回。
 
 \begin{figure}[H]
-    \centering
-    \includegraphics[width=0.92\linewidth]{figures/two_layer_evaluation_design.png}
-    \caption{公开 MOT 基准与自标注真实场景验证集构成的双层实验设计。}
+\centering
+\begin{subfigure}{0.49\linewidth}\centering
+\includegraphics[width=\linewidth]{figures/two_layer_evaluation_design.png}
+\caption{公开 MOT + 自标注真实验证。}
+\end{subfigure}\hfill
+\begin{subfigure}{0.49\linewidth}\centering
+\includegraphics[width=\linewidth]{figures/iteration_ablation_curve.png}
+\caption{从 Baseline 到优化版本。}
+\end{subfigure}
+\caption{双层实验设计与算法迭代过程。}
+\label{fig:expdesign}
 \end{figure}
+
+\section{ReID 训练与评价指标}
+外观分支使用 OSNet-AIN / MobileNet Hybrid 作为 ReID 特征提取模型，在 Market1501 与 MSMT17 数据上训练。训练采用 SGD 优化器和 Cosine Annealing 学习率调度，batch size 为 32，输入尺寸为 $256\times128$。训练日志 \texttt{original\_project/run\_logs/reid\_training\_log.txt} 记录 178 个 epoch，最佳 checkpoint 出现在 epoch 178，验证 mAP 为 0.6272。图\ref{fig:train} 由日志直接解析生成，展示 loss 下降、学习率衰减和验证 mAP 提升。
 
 \begin{figure}[H]
-    \centering
-    \includegraphics[width=0.9\linewidth]{figures/self_annotation_workflow.png}
-    \caption{自标注验证集构建流程：抽帧、行人框标注、身份链接、MOT 格式导出与评估。}
+\centering
+\includegraphics[width=0.76\linewidth]{figures/training_curve_reid.png}
+\caption{ReID 模型训练曲线：由日志解析得到，最佳验证 mAP 为 0.6272。}
+\label{fig:train}
 \end{figure}
 
-\section{实验设置与迭代过程}
-\subsection{从 Baseline 到优化版本}
-为体现算法实现的迭代过程，本文设置从简单到复杂的多组实验：
-\begin{itemize}
-    \item \textbf{V0 Baseline / IoU only：} 只使用检测框空间重叠进行关联，作为最基础对照。
-    \item \textbf{V1 + Kalman：} 引入运动预测，提升短时遮挡和检测抖动情况下的连续性。
-    \item \textbf{V2 + ReID：} 加入外观特征，解决目标交叉后仅靠位置难以恢复身份的问题。
-    \item \textbf{V3 + Pose Crop：} 使用姿态关键点裁剪，使 ReID 输入更集中于人体区域，减少背景干扰。
-    \item \textbf{V4 + BIoU/低置信扩展：} 对遮挡、低置信目标采用更宽容的关联门控，提升真实场景召回。
-\end{itemize}
+评价指标采用 MOT 常用定义。IDP 表示身份匹配精确率，IDR 表示身份匹配召回率，IDF1 是二者调和平均；MOTA 综合考虑漏检、误检和身份切换；ID Switches 统计同一 GT 身份被分配到不同预测 ID 的次数。评价脚本在每帧内按 IoU 阈值和匈牙利算法匹配 GT 与预测框，累计 TP、FP、FN 和身份切换。
 
-\begin{figure}[H]
-    \centering
-    \includegraphics[width=0.88\linewidth]{figures/iteration_ablation_curve.png}
-    \caption{从 Baseline 到优化版本的迭代消融过程。}
-\end{figure}
-
-需要说明的是，当前仓库中的 Demo 消融可以直接复现 V0--V3 的指标；真实 Wuzhou 场景目前已有完整最终版本评估结果，但若要在真实场景上给出严格的 V0--V4 全部对照，需要继续导出每个中间版本的 tracker 文件。本文已经提供统一评估脚本，后续只需将不同版本的结果保存为 MOT 格式 txt，即可得到真实场景的完整消融表。
-
-\subsection{ReID 模型训练设置}
-外观分支使用 OSNet-AIN / MobileNet Hybrid 作为 ReID 特征提取模型，并在 Market1501 与 MSMT17 行人重识别数据上进行训练。训练采用 SGD 优化器和 Cosine Annealing 学习率调度，batch size 为 32，输入图像尺寸为 $256\times128$。训练日志保存在 \texttt{original\_project/run\_logs/reid\_training\_log.txt}，共记录 178 个 epoch，最佳 checkpoint 出现在 epoch 178，验证 mAP 为 0.6272。图\ref{fig:train} 根据该日志直接绘制，展示了训练损失下降、学习率衰减和验证 mAP 提升过程。
-
-\begin{figure}[H]
-    \centering
-    \includegraphics[width=0.86\linewidth]{figures/training_curve_reid.png}
-    \caption{ReID 模型训练曲线。曲线由 \texttt{reid\_training\_log.txt} 解析生成，最佳验证 mAP 为 0.6272。}
-    \label{fig:train}
-\end{figure}
-
-需要说明的是，ReID 任务通常报告 mAP 与 Rank-1/Rank-5 等指标。当前日志记录了训练 loss、学习率和验证 mAP，可用于说明外观分支训练过程；后续若补充 Rank-1 或 CMC 曲线，可进一步增强模型训练部分的完整性。
-
-\subsection{评价指标}
-本文采用 MOT 常用指标。IDP 表示身份匹配精确率，IDR 表示身份匹配召回率，IDF1 是二者的调和平均；MOTA 综合考虑漏检、误检和身份切换；ID Switches 表示同一 GT 身份在时间上被分配到不同预测 ID 的次数。评价脚本使用匈牙利算法在每帧内按 IoU 阈值匹配 GT 与预测框，并累计 TP、FP、FN 和身份切换次数。
-
-\section{实验结果与分析}
-\subsection{Demo 消融结果}
-表\ref{tab:main}给出了 Demo 数据上的消融结果。Baseline 已能在简单场景中得到较高 IDF1，但仍有身份切换；引入外观和姿态裁剪后，ID Switches 降为 0，说明干净的人体裁剪有利于 ReID 特征稳定。Kalman 单独使用时可以平滑轨迹，但若缺少外观约束，在交叉情况下仍可能产生身份混淆，这也说明运动分支与外观分支必须结合使用。
+\section{实验结果与误差分析}
+Demo 消融结果见表\ref{tab:demo}。Baseline 已有较高 IDF1，但仍有身份切换；加入 Box Crop/ReID 后身份匹配更稳定；Pose Crop 进一步减少背景干扰，使 ID Switches 降为 0。Kalman 单独使用可平滑轨迹，但缺少外观约束时仍可能在交叉场景中混淆身份，因此运动分支与外观分支需要联合使用。
 
 \begin{table}[H]
 \centering
-\caption{不同跟踪设置下的 Demo 指标对比}
-\label{tab:main}
+\caption{Demo 消融指标对比}
+\label{tab:demo}
 \begin{tabular}{lccccc}
 \toprule
 方法 & IDF1(\%) & IDP(\%) & IDR(\%) & MOTA(\%) & IDs$\downarrow$ \\
@@ -157,12 +122,11 @@ Pose Crop & \textbf{100.00} & \textbf{100.00} & \textbf{100.00} & \textbf{100.00
 \end{tabular}
 \end{table}
 
-\subsection{自标注真实场景结果}
-在 Wuzhou\_MidRoad 自标注验证集上，GT 包含 33846 个行人标注框，预测结果包含 21603 个输出框。统一评估脚本得到表\ref{tab:real}所示结果。
+Wuzhou\_MidRoad 自标注真实场景结果见表\ref{tab:real}。IDP 达到 94.01\%，说明系统一旦给出匹配，身份精确率较高；IDR 为 60.01\%，说明仍存在较多漏检或未匹配目标；MOTA 为 55.49\%，主要受 FN=13536 和 IDs=236 影响。这表明真实场景的主要瓶颈不是误检过多，而是遮挡、小目标和交叉行走造成的召回不足与身份切换。
 
 \begin{table}[H]
 \centering
-\caption{Wuzhou\_MidRoad 自标注真实场景评估指标}
+\caption{Wuzhou\_MidRoad 自标注真实场景指标}
 \label{tab:real}
 \begin{tabular}{lcccccccc}
 \toprule
@@ -173,45 +137,30 @@ Wuzhou\_MidRoad & 73.26 & 94.01 & 60.01 & 55.49 & 236 & 20310 & 1293 & 13536 \\
 \end{tabular}
 \end{table}
 
-从结果看，IDP 达到 94.01\%，说明一旦系统给出匹配，预测身份的精确率较高；IDR 为 60.01\%，说明真实场景中仍存在较多漏检或未匹配目标；MOTA 为 55.49\%，主要受到 FN=13536 和 IDs=236 的影响。这表明真实场景的主要瓶颈不是误检过多，而是密集遮挡、远距离小目标和交叉行走带来的召回不足与身份切换。
-
 \begin{figure}[H]
-    \centering
-    \begin{subfigure}{0.48\linewidth}
-        \centering
-        \includegraphics[width=\linewidth]{figures/wuzhou_dataset_composition.png}
-        \caption{自标注验证集规模与逐帧密度。}
-    \end{subfigure}
-    \hfill
-    \begin{subfigure}{0.48\linewidth}
-        \centering
-        \includegraphics[width=\linewidth]{figures/wuzhou_metric_dashboard.png}
-        \caption{真实场景指标与误差组成。}
-    \end{subfigure}
-    \caption{Wuzhou\_MidRoad 数据规模与真实场景评估结果。}
+\centering
+\begin{subfigure}{0.48\linewidth}\centering
+\includegraphics[width=\linewidth]{figures/wuzhou_dataset_composition.png}
+\caption{自标注验证集规模与密度。}
+\end{subfigure}\hfill
+\begin{subfigure}{0.48\linewidth}\centering
+\includegraphics[width=\linewidth]{figures/wuzhou_metric_dashboard.png}
+\caption{真实场景指标与误差组成。}
+\end{subfigure}
+\caption{Wuzhou\_MidRoad 数据规模与评估结果。}
+\label{fig:wuzhou}
 \end{figure}
 
-\begin{figure}[H]
-    \centering
-    \includegraphics[width=0.82\linewidth]{figures/wuzhou_trajectory_map.png}
-    \caption{自标注 GT 轨迹与跟踪预测轨迹的空间分布对比。}
-\end{figure}
+\section{实现细节、复现性与总结}
+项目代码围绕可复现评阅组织：\texttt{src/evaluation/metric.py} 实现 MOT 风格指标统计；\texttt{src/tracking/tracker.py} 实现 Kalman 状态预测、轨迹更新与外观特征平滑；\texttt{src/cropping/crop\_strategy.py} 实现标准框裁剪和姿态感知裁剪；\texttt{scripts/run\_experiments.py} 复现 Demo 消融；\texttt{scripts/run\_original\_project.py} 复现 Wuzhou 真实评估；\texttt{scripts/generate\_training\_curve.py} 从日志重绘训练曲线；\texttt{scripts/generate\_enhanced\_figures.py} 可从视频自动抽帧生成真实背景图。
 
-\section{实现细节与可复现性}
-项目代码围绕可复现课程评阅进行组织。\texttt{src/evaluation/metric.py} 实现 MOT 风格的逐帧匹配、IDF1/MOTA/TP/FP/FN 统计；\texttt{src/tracking/tracker.py} 实现 Kalman 状态预测、轨迹更新和外观特征平滑；\texttt{src/cropping/crop\_strategy.py} 实现标准框裁剪和姿态感知裁剪；\texttt{scripts/run\_experiments.py} 复现 Demo 消融实验；\texttt{scripts/run\_original\_project.py} 复现 Wuzhou 真实场景评估；\texttt{scripts/generate\_training\_curve.py} 从训练日志重绘 ReID 训练曲线；\texttt{scripts/generate\_enhanced\_figures.py} 可从视频自动抽帧并生成真实背景配图。
-
-所有核心结果均可通过脚本重新生成。Demo 指标来自 \texttt{scripts/run\_experiments.py --exp all}，真实场景指标来自 \texttt{scripts/run\_original\_project.py --exp wuzhou}，训练曲线来自 \texttt{original\_project/run\_logs/reid\_training\_log.txt}。这种组织方式使评阅者既可以查看最终 PDF，也可以回到代码和日志复查每张图、每个指标的来源。
-
-\section{总结与展望}
-本文完成了一个运动--外观双分支的多目标行人跟踪课程项目，并通过双层实验设计突出工作量：公开 MOT 层体现标准评测协议理解，自标注 Wuzhou\_MidRoad 层体现真实数据构建和实践验证。方法上，本文解释了为什么需要 Kalman 滤波、匈牙利匹配、ReID 外观分支、姿态裁剪、低置信度搜索扩展和 BIoU 匹配。实验上，Demo 消融展示了从 Baseline 到优化版本的迭代过程，真实场景评估进一步揭示了密集遮挡条件下的召回和身份切换问题。
-
-后续工作包括：第一，在真实 Wuzhou 场景上导出 V0--V4 每个中间版本的 tracker 文件，形成更严格的真实消融表；第二，补充 detector/ReID 的训练日志和损失曲线；第三，进一步分析不同遮挡等级、目标尺度和人群密度下的错误分布，使系统从课程项目扩展为更完整的实验平台。
+综上，本文完成了一个从算法设计、训练日志、标准评测到自标注真实验证均可复现的 MOT 课程项目。方法上解释了 Kalman、匈牙利、ReID、姿态裁剪、BIoU 与低置信度扩展的作用；实验上展示了 Baseline 到优化版本的迭代过程，并用 Wuzhou\_MidRoad 揭示真实遮挡条件下的主要误差。后续可继续导出真实场景 V0--V4 中间 tracker 文件，形成更严格的真实消融表，并补充 Rank-1/CMC 等 ReID 评价。
 
 \begin{thebibliography}{9}
-\bibitem{sort} Bewley A., Ge Z., Ott L., Ramos F., Upcroft B. Simple Online and Realtime Tracking. \textit{IEEE International Conference on Image Processing}, 2016.
-\bibitem{deepsort} Wojke N., Bewley A., Paulus D. Simple Online and Realtime Tracking with a Deep Association Metric. \textit{IEEE International Conference on Image Processing}, 2017.
+\bibitem{sort} Bewley A., Ge Z., Ott L., Ramos F., Upcroft B. Simple Online and Realtime Tracking. \textit{IEEE ICIP}, 2016.
+\bibitem{deepsort} Wojke N., Bewley A., Paulus D. Simple Online and Realtime Tracking with a Deep Association Metric. \textit{IEEE ICIP}, 2017.
 \bibitem{motchallenge} Milan A., Leal-Taixé L., Reid I., Roth S., Schindler K. MOT16: A Benchmark for Multi-Object Tracking. \textit{arXiv:1603.00831}, 2016.
-\bibitem{bytetrack} Zhang Y., Sun P., Jiang Y., et al. ByteTrack: Multi-Object Tracking by Associating Every Detection Box. \textit{European Conference on Computer Vision}, 2022.
+\bibitem{bytetrack} Zhang Y., Sun P., Jiang Y., et al. ByteTrack: Multi-Object Tracking by Associating Every Detection Box. \textit{ECCV}, 2022.
 \end{thebibliography}
 
 \end{document}
