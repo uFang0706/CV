@@ -1,9 +1,9 @@
-@page { size: A4; margin: 12mm 12mm; }
+@page { size: A4; margin: 11mm 12mm; }
 html, body { margin: 0; padding: 0; }
 body {
   font-family: "STHeiti", "PingFang SC", "Noto Sans CJK SC", sans-serif;
-  font-size: 10.0pt;
-  line-height: 1.30;
+  font-size: 9.9pt;
+  line-height: 1.28;
   max-width: none;
 }
 h1 { font-size: 16pt; margin: 0.85em 0 0.42em; }
@@ -13,7 +13,7 @@ p { margin: 0.34em 0; }
 ul, ol { margin-top: 0.24em; margin-bottom: 0.24em; }
 figure { margin: 0.62em auto 0.72em; text-align: center; page-break-inside: avoid; }
 figcaption { font-size: 8.6pt; line-height: 1.18; margin-top: 0.22em; }
-img { max-height: 55mm; object-fit: contain; }
+img { max-height: 52mm; object-fit: contain; }
 figure img { width: auto; max-width: 100%; }
 table { font-size: 9pt; border-collapse: collapse; margin: 0.5em auto; page-break-inside: avoid; }
 th, td { padding: 2px 5px; }
