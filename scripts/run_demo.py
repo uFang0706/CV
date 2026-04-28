@@ -49,7 +49,8 @@ def run_demo_mode():
     print("\n3. Summary")
     print("-" * 40)
     print(f"IDF1: {results['IDF1']}")
-    print(f"MOTA: {results['MOTA']}")
+    print(f"IDP: {results['IDP']}")
+    print(f"IDR: {results['IDR']}")
     print(f"ID Switches: {results['IDs']}")
     print(f"Ground Truth Objects: {results['GTs']}")
 

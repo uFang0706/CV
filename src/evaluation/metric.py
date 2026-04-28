@@ -1,4 +1,3 @@
-import motmetrics as mm
 import pandas as pd
 import numpy as np
 import warnings
@@ -48,12 +47,66 @@ def read_excel(excel_path, id_field):
     return result_df
 
 
+def iou(box1, box2):
+    x1 = max(box1[0], box2[0])
+    y1 = max(box1[1], box2[1])
+    x2 = min(box1[0] + box1[2], box2[0] + box2[2])
+    y2 = min(box1[1] + box1[3], box2[1] + box2[3])
+    inter_area = max(0, x2 - x1) * max(0, y2 - y1)
+    box1_area = box1[2] * box1[3]
+    box2_area = box2[2] * box2[3]
+    union_area = box1_area + box2_area - inter_area
+    return inter_area / (union_area + 1e-6)
+
+
+def linear_assignment(cost_matrix, threshold=0.5):
+    if cost_matrix.size == 0:
+        return [], list(range(cost_matrix.shape[0])), list(range(cost_matrix.shape[1]))
+
+    n_rows, n_cols = cost_matrix.shape
+    rows = list(range(n_rows))
+    cols = list(range(n_cols))
+    matches = []
+    unmatched_rows = []
+    unmatched_cols = []
+
+    while rows and cols:
+        min_val = float('inf')
+        min_i, min_j = -1, -1
+
+        for i in rows:
+            for j in cols:
+                if cost_matrix[i, j] < min_val and cost_matrix[i, j] < threshold:
+                    min_val = cost_matrix[i, j]
+                    min_i, min_j = i, j
+
+        if min_i >= 0:
+            matches.append((min_i, min_j))
+            rows.remove(min_i)
+            cols.remove(min_j)
+        else:
+            break
+
+    unmatched_rows = rows
+    unmatched_cols = cols
+
+    return matches, unmatched_rows, unmatched_cols
+
+
 class TrackEval:
     def __init__(self, if_kuajing=False):
         self.record_mem = {}
         self.global_count = 1
         self.if_kuajing = if_kuajing
-        self.acc = mm.MOTAccumulator(auto_id=True)
+        
+        self.tp = 0
+        self.fp = 0
+        self.fn = 0
+        self.id_switches = 0
+        self.gt_ids = set()
+        self.pr_ids = set()
+        self.frame_matches = {}
+        self.track_assignments = {}
 
     def _process_detection_csv(self, df, id_field='primary_uuid', mark_id=0):
         mem = {}
@@ -64,8 +117,8 @@ class TrackEval:
             box_w = row["box_x2"] - row["box_x1"]
             box_h = row["box_y2"] - row["box_y1"]
             primary_uuid = row[id_field]
-            camera_id = row["camera_id"]
-            camera_name = row["camera_name"]
+            camera_id = row.get("camera_id", "1")
+            camera_name = row.get("camera_name", "scene1")
 
             if primary_uuid not in self.record_mem:
                 self.record_mem[primary_uuid] = self.global_count
@@ -94,12 +147,7 @@ class TrackEval:
             if primary_uuid not in self.record_mem:
                 self.record_mem[primary_uuid] = self.global_count
                 self.global_count += 1
-            if mark_id == 0:
-                mark = str(idx_frame)
-            elif mark_id == 1:
-                mark = str(idx_frame)
-            else:
-                raise ValueError()
+            mark = str(idx_frame)
             if mark not in mem:
                 mem[mark] = []
             mem[mark].append([box_x1, box_y1, box_w, box_h, self.record_mem[primary_uuid]])
@@ -117,8 +165,8 @@ class TrackEval:
         pr_suffix = pr_path.split('.')[-1]
         gt_suffix = gt_path.split('.')[-1]
 
-        pr_id = 'oid'
-        gt_id = 'oid'
+        pr_id = id_field
+        gt_id = id_field
 
         if self.if_kuajing:
             pr_id = 'secondary_uuid'
@@ -126,77 +174,75 @@ class TrackEval:
         mem_pr = self._process_detection(pr_df, pr_suffix, pr_id, 0)
         mem_gt = self._process_detection(gt_df, gt_suffix, gt_id, 1)
 
-        if self.if_kuajing:
-            for k, v in mem_gt.items():
-                for value in v:
-                    value[-1] = 1
-
-        total_predictions = 0
-        total_ground_truth = 0
-
-        matched_frames = 0
         for k in mem_gt:
+            for value in mem_gt[k]:
+                self.gt_ids.add(value[-1])
+
+        for k in mem_pr:
+            for value in mem_pr[k]:
+                self.pr_ids.add(value[-1])
+
+        for frame in mem_gt:
             pr_key = None
-            for pr_k in mem_pr.keys():
-                if pr_k.endswith(f"_{k}"):
-                    pr_key = pr_k
+            for pk in mem_pr.keys():
+                if pk.endswith(f"_{frame}"):
+                    pr_key = pk
                     break
 
             if pr_key and pr_key in mem_pr:
-                matched_frames += 1
+                gt_boxes = np.array(mem_gt[frame])[:, :4]
+                pr_boxes = np.array(mem_pr[pr_key])[:, :4]
+                gt_ids = np.array(mem_gt[frame])[:, -1].tolist()
+                pr_ids = np.array(mem_pr[pr_key])[:, -1].tolist()
 
-                gtx1y1wh = np.array(mem_gt[k])[:, :4]
-                prx1y1wh = np.array(mem_pr[pr_key])[:, :4]
+                n_gt = len(gt_boxes)
+                n_pr = len(pr_boxes)
 
-                gt_id = np.array(mem_gt[k])[:, -1].tolist()
-                pr_id = np.array(mem_pr[pr_key])[:, -1].tolist()
+                cost_matrix = np.ones((n_gt, n_pr)) * 2.0
 
-                total_predictions += len(pr_id)
-                total_ground_truth += len(gt_id)
+                for i in range(n_gt):
+                    for j in range(n_pr):
+                        cost_matrix[i, j] = 1 - iou(gt_boxes[i], pr_boxes[j])
 
-                assert len(gt_id) == gtx1y1wh.shape[0]
-                assert len(pr_id) == prx1y1wh.shape[0]
-                self.acc.update(
-                    gt_id,
-                    pr_id,
-                    mm.distances.iou_matrix(
-                        gtx1y1wh,
-                        prx1y1wh,
-                        max_iou=0.5
-                    )
-                )
+                matches, unmatched_gt, unmatched_pr = linear_assignment(cost_matrix, threshold=0.5)
+
+                self.tp += len(matches)
+                self.fn += len(unmatched_gt)
+                self.fp += len(unmatched_pr)
+
+                self.frame_matches[frame] = []
+                for i, j in matches:
+                    self.frame_matches[frame].append((gt_ids[i], pr_ids[j]))
+
+                    if gt_ids[i] in self.track_assignments:
+                        if self.track_assignments[gt_ids[i]] != pr_ids[j]:
+                            self.id_switches += 1
+                    self.track_assignments[gt_ids[i]] = pr_ids[j]
 
     def get_result(self):
-        mh = mm.metrics.create()
-        summary = mh.compute(
-            self.acc,
-            metrics=mm.metrics.motchallenge_metrics,
-            name='acc'
-        )
+        total_objects = len(self.gt_ids)
+        total_predictions = len(self.pr_ids)
 
-        strsummary = mm.io.render_summary(
-            summary,
-            formatters=mh.formatters,
-            namemap=mm.io.motchallenge_metric_names
-        )
-
-        IDF1 = np.round(summary['idf1'].values[0] * 100, 2)
-        MOTA = np.round(summary['mota'].values[0] * 100, 2)
-        IDs = summary['num_switches'].values[0]
-        GTs = summary['num_unique_objects'].values[0]
+        IDP = self.tp / (self.tp + self.fp) if (self.tp + self.fp) > 0 else 0
+        IDR = self.tp / (self.tp + self.fn) if (self.tp + self.fn) > 0 else 0
+        IDF1 = 2 * IDP * IDR / (IDP + IDR) if (IDP + IDR) > 0 else 0
 
         table = PrettyTable()
-        table.field_names = ["IDF1(up)", "MOTA(up)", "IDs(down)", "GTs"]
-        table.add_row([IDF1, MOTA, IDs, GTs])
+        table.field_names = ["IDF1(up)", "IDP(up)", "IDR(up)", "IDs(down)", "GTs"]
+        table.add_row([round(IDF1*100, 2), round(IDP*100, 2), round(IDR*100, 2), self.id_switches, total_objects])
 
         print(table)
-        print(strsummary)
+        print("\nDetailed Results:")
+        print(f"True Positives: {self.tp}")
+        print(f"False Positives: {self.fp}")
+        print(f"False Negatives: {self.fn}")
 
         return {
-            'IDF1': IDF1,
-            'MOTA': MOTA,
-            'IDs': IDs,
-            'GTs': GTs
+            'IDF1': round(IDF1*100, 2),
+            'IDP': round(IDP*100, 2),
+            'IDR': round(IDR*100, 2),
+            'IDs': self.id_switches,
+            'GTs': total_objects
         }
 
 
@@ -205,7 +251,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--pred_file", type=str, required=True, help="Prediction results CSV file")
     parser.add_argument("--gt_file", type=str, required=True, help="Ground truth file")
-    parser.add_argument("--id_field", type=str, default='oid', help="ID field name")
+    parser.add_argument("--id_field", type=str, default='primary_uuid', help="ID field name")
     args = parser.parse_args()
 
     evaluator = TrackEval()
