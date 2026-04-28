@@ -38,9 +38,9 @@ env/
 *.pth
 *.onnx
 *.pkl
+weights/
 
 # Data
-*.mp4
 *.avi
 *.mov
 *.jpg
@@ -48,6 +48,7 @@ env/
 !data/sample_csv/*.csv
 !data/demo_results/*.csv
 !report/figures/*.png
+!original_project/test_videos/Wuzhou_MidRoad/Wuzhou_MidRoad.mp4
 
 # Results
 results/metrics/*

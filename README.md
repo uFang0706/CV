@@ -168,7 +168,44 @@ pip install -r requirements-full.txt
 
 当前仓库优先保证课程评阅时的 **CPU Demo 可复现性**，Full mode 以接口和配置形式保留，便于后续接入真实检测器与 ReID 模型。
 
-## 8. 课程报告对应关系
+## 8. 原始项目整合（Optional）
+
+本仓库还整合了原始实习项目的真实数据与运行结果，位于 `original_project/` 目录：
+
+```text
+original_project/
+├── results/
+│   ├── gt/                      # MOT17/MOT20 公开数据集 GT
+│   │   ├── MOT17-val/
+│   │   └── MOT20-val/
+│   └── trackers/                # 已有跟踪结果
+│       └── Wuzhou_MidRoad.txt   # 某路口真实场景跟踪结果
+├── test_videos/
+│   └── Wuzhou_MidRoad/
+│       ├── gt.txt               # 33846条标注，117个ID，2474帧
+│       └── Wuzhou_MidRoad.mp4  # 原始视频
+└── run_logs/                   # 运行日志
+```
+
+### 8.1 运行真实数据评估
+
+```bash
+python scripts/run_original_project.py --exp wuzhou --save_results
+```
+
+评估结果：
+
+| 指标 | 值 |
+|------|-----|
+| IDF1 | 73.26\% |
+| IDP | 94.01\% |
+| IDR | 60.01\% |
+| MOTA | 55.49\% |
+| ID Switches | 236 |
+
+详细指标：TP=20310, FP=1293, FN=13536
+
+## 9. 课程报告对应关系
 
 | 报告部分 | 对应代码/数据 |
 |---|---|
@@ -177,8 +214,9 @@ pip install -r requirements-full.txt
 | 指标计算 | `src/evaluation/metric.py`, `scripts/evaluate.py` |
 | 可视化 | `src/visualization/visual.py`, `scripts/visualize.py` |
 | 报告插图 | `generate_figures.py`, `report/figures/` |
+| 真实场景评估 | `original_project/`, `scripts/run_original_project.py` |
 
-## 9. 注意事项
+## 10. 注意事项
 
 1. Demo 数据用于教学复现，不能视为真实场景性能结论。
 2. 报告中的方法设计与实验分析强调“可解释的小型研究”，不是完整工业系统复刻。
