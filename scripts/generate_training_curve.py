@@ -147,28 +147,33 @@ def generate_curve(log_path: Path, output_path: Path) -> None:
     ax_cards.axis("off")
     ax_cards.add_patch(plt.Rectangle((0, 0.02), 1, 0.92, transform=ax_cards.transAxes,
                                      facecolor="#F8FAFC", edgecolor="#CBD5E1", linewidth=1.0))
-    draw_card(ax_cards, 0.025, "BEST CHECKPOINT", f"Epoch {best['epoch']} / mAP {best['map']:.4f}",
-              "reported by the saved log summary", "#DC2626")
-    draw_card(ax_cards, 0.265, "LOG DENSITY", f"{len(rows)} sampled rows", 
-              "raw checkpoints only; no interpolation claim", "#2563EB")
-    draw_card(ax_cards, 0.495, "MODEL / DATA", meta.get("Model", "OSNet-AIN / MobileNet Hybrid"),
-              meta.get("Dataset", "Market1501 + MSMT17"), "#7C3AED")
-    draw_card(ax_cards, 0.745, "OPTIMIZER", meta.get("Optimizer", "SGD + Cosine Annealing"),
-              f"batch={meta.get('Batch Size', '32')}, image={meta.get('Image Size', '256x128')}", "#059669")
+    draw_card(ax_cards, 0.025, "最佳检查点", f"第 {best['epoch']} 轮 / mAP {best['map']:.4f}",
+              "训练日志记录的最优模型", "#DC2626")
+    draw_card(ax_cards, 0.265, "日志密度", f"{len(rows)} 个记录点", 
+              "只画原始记录点，不虚构平滑曲线", "#2563EB")
+    model_text = meta.get("Model", "OSNet-AIN / MobileNet Hybrid")
+    data_text = meta.get("Dataset", "Market1501 + MSMT17")
+    opt_text = meta.get("Optimizer", "SGD + Cosine Annealing")
+    if "Cosine" in opt_text:
+        opt_text = "SGD + 余弦退火"
+    draw_card(ax_cards, 0.495, "模型 / 数据", model_text,
+              data_text, "#7C3AED")
+    draw_card(ax_cards, 0.745, "优化器", opt_text,
+              f"批量={meta.get('Batch Size', '32')}, 图像={meta.get('Image Size', '256x128')}", "#059669")
 
     # Loss curves - show both train and validation
-    ax_loss.plot(epochs, trn_losses, color="#2563EB", linewidth=2.0, drawstyle="steps-post", label="Train")
+    ax_loss.plot(epochs, trn_losses, color="#2563EB", linewidth=2.0, drawstyle="steps-post", label="训练")
     ax_loss.scatter(epochs, trn_losses, s=24, color="white", edgecolor="#2563EB", linewidth=1.4, zorder=3)
     
     if is_new_format:
-        ax_loss.plot(epochs, val_losses, color="#EF4444", linewidth=2.0, drawstyle="steps-post", label="Val")
+        ax_loss.plot(epochs, val_losses, color="#EF4444", linewidth=2.0, drawstyle="steps-post", label="验证")
         ax_loss.scatter(epochs, val_losses, s=24, color="white", edgecolor="#EF4444", linewidth=1.4, zorder=3)
         ax_loss.legend(fontsize=9)
     
     ax_loss.fill_between(epochs, trn_losses, trn_losses.min() - 0.1, step="post", color="#DBEAFE", alpha=0.45)
-    ax_loss.set_title("Loss: logged checkpoints", fontsize=10.5, fontweight="bold")
-    ax_loss.set_xlabel("Epoch")
-    ax_loss.set_ylabel("Loss")
+    ax_loss.set_title("损失函数：日志记录点", fontsize=10.5, fontweight="bold")
+    ax_loss.set_xlabel("训练轮次")
+    ax_loss.set_ylabel("损失")
     ax_loss.grid(True, axis="y", alpha=0.25)
     ax_loss.spines[["top", "right"]].set_visible(False)
 
@@ -181,18 +186,18 @@ def generate_curve(log_path: Path, output_path: Path) -> None:
         ax_map_twin = ax_map.twinx()
         ax_map_twin.plot(epochs, val_accs, color="#3B82F6", linewidth=1.8, drawstyle="steps-post", alpha=0.7)
         ax_map_twin.scatter(epochs, val_accs, s=20, color="white", edgecolor="#3B82F6", linewidth=1.2, zorder=3)
-        ax_map_twin.set_ylabel("Val Acc", color="#3B82F6")
+        ax_map_twin.set_ylabel("验证准确率", color="#3B82F6")
         ax_map_twin.tick_params(axis='y', labelcolor="#3B82F6")
         ax_map_twin.set_ylim(0, 0.8)
     
     ax_map.scatter([best["epoch"]], [best["map"]], marker="*", s=170, color="#F59E0B",
                    edgecolor="#111827", linewidth=0.8, zorder=4)
-    ax_map.annotate(f"best {best['map']:.4f}", xy=(best["epoch"], best["map"]),
+    ax_map.annotate(f"最佳 {best['map']:.4f}", xy=(best["epoch"], best["map"]),
                     xytext=(-56, 18), textcoords="offset points",
                     arrowprops=dict(arrowstyle="->", lw=1.2, color="#64748B"), fontsize=8.5,
                     bbox=dict(boxstyle="round,pad=0.22", fc="#FFF7ED", ec="#FDBA74"))
-    ax_map.set_title("Validation mAP: raw log values", fontsize=10.5, fontweight="bold")
-    ax_map.set_xlabel("Epoch")
+    ax_map.set_title("验证 mAP：原始日志值", fontsize=10.5, fontweight="bold")
+    ax_map.set_xlabel("训练轮次")
     ax_map.set_ylabel("mAP@0.5")
     ax_map.set_ylim(0, max(0.68, maps.max() + 0.035))
     ax_map.grid(True, axis="y", alpha=0.25)
@@ -201,13 +206,13 @@ def generate_curve(log_path: Path, output_path: Path) -> None:
     # LR schedule
     ax_lr.semilogy(epochs, lrs, color="#059669", linewidth=2.0, drawstyle="steps-post")
     ax_lr.scatter(epochs, lrs, s=24, color="white", edgecolor="#059669", linewidth=1.4)
-    ax_lr.set_title("LR schedule (cosine annealing)", fontsize=10.5, fontweight="bold")
-    ax_lr.set_xlabel("Epoch")
-    ax_lr.set_ylabel("LR (log scale)")
+    ax_lr.set_title("学习率调度（余弦退火）", fontsize=10.5, fontweight="bold")
+    ax_lr.set_xlabel("训练轮次")
+    ax_lr.set_ylabel("学习率（对数刻度）")
     ax_lr.grid(True, which="both", axis="y", alpha=0.25)
     ax_lr.spines[["top", "right"]].set_visible(False)
 
-    fig.suptitle("ReID Training Log Summary (raw recorded checkpoints, not a smoothed synthetic curve)",
+    fig.suptitle("ReID 训练日志摘要（只展示真实记录点，非人工平滑曲线）",
                  x=0.5, y=0.985, fontsize=13, fontweight="bold", color="#0F172A")
     output_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(output_path, dpi=190, bbox_inches="tight", facecolor="white")

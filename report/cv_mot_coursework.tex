@@ -1,5 +1,5 @@
 \documentclass[UTF8,a4paper,10pt]{ctexart}
-\usepackage[margin=1.55cm]{geometry}
+\usepackage[top=2.2cm,bottom=2.0cm,left=2.7cm,right=2.3cm]{geometry}
 \usepackage{graphicx}
 \usepackage{booktabs}
 \usepackage{float}
@@ -15,22 +15,21 @@
 \renewcommand{\baselinestretch}{1.04}
 \captionsetup{font=small,skip=4pt}
 \title{\vspace{-0.7em}\textbf{面向密集公共场景的运动--外观双分支多目标行人跟踪系统设计与实验分析}\vspace{-0.4em}}
-\author{方瑜}
+\author{23121302，方瑜}
 \date{2026年4月\vspace{-0.8em}}
 
 \begin{document}
 \maketitle
 \vspace{-1.3em}
 
-\begin{abstract}
-多目标行人跟踪（MOT）的关键不仅是检测行人位置，还要在遮挡、交叉、尺度变化和检测抖动时维持身份编号一致。本文实现了一个面向密集公共场景的运动--外观双分支跟踪系统：运动分支使用 Kalman 滤波预测短时位置，外观分支使用 ReID 特征描述行人身份，二者融合后由匈牙利算法完成全局一对一匹配。实验采用双层设计：一层对齐 MOT17/MOT20 的标准格式与评测协议，另一层构建 Wuzhou\_MidRoad 自标注真实验证集（2474 帧、117 个 ID、33846 个标注框）。系统从 Baseline、Kalman、ReID、姿态裁剪到 BIoU/低置信度扩展逐步迭代；最终在真实场景上取得 IDF1 73.26\%、MOTA 55.49\%、ID Switches 236。报告同时给出训练日志摘要、消融结果、路线分析和误差解释，以体现课程项目的算法设计、数据构建和复现完整性。
-\end{abstract}
-\noindent\textbf{关键词：}多目标跟踪；ReID；Kalman 滤波；匈牙利匹配；BIoU；自标注验证集
+\noindent\textbf{摘 要：}多目标行人跟踪（MOT）的关键不仅是检测行人位置，还要在遮挡、交叉、尺度变化和检测抖动时维持身份编号一致。本文实现了一个面向密集公共场景的运动--外观双分支跟踪系统：运动分支使用 Kalman 滤波预测短时位置，外观分支使用 ReID 特征描述行人身份，二者融合后由匈牙利算法完成全局一对一匹配。实验采用双层设计：一层对齐 MOT17/MOT20 的标准格式与评测协议，另一层构建 Wuzhou\_MidRoad 自标注真实验证集（2474 帧、117 个 ID、33846 个标注框）。系统从 Baseline、Kalman、ReID、姿态裁剪到 BIoU/低置信度扩展逐步迭代；最终在真实场景上取得 IDF1 73.26\%、MOTA 55.49\%、ID Switches 236。报告同时给出训练日志摘要、消融结果、路线分析和误差解释，以体现课程项目的算法设计、数据构建和复现完整性。
 
-\section{问题定义、相关工作与总体思路}
+\noindent\textbf{关键词：}多目标跟踪，行人重识别，卡尔曼滤波，匈牙利匹配，Buffered IoU
+
+\section{项目背景和意义}
 密集公共场景中的行人跟踪难点是“持续确认同一个人”。检测器只回答“这一帧哪里有人”，而 MOT 系统还必须回答“这一帧的人是否是上一帧的同一个人”。若仅依赖单帧 IoU 或最近邻匹配，目标交叉后容易 ID Switch；若只使用外观特征，检测框包含背景、遮挡物或低分辨率行人时 ReID 特征又会被污染。因此本文将任务拆成两个互补分支：运动分支负责短时连续性，外观分支负责身份一致性。
 
-从相关研究看，SORT\cite{sort} 证明了 Kalman 滤波与匈牙利匹配可以构成简洁高效的在线跟踪基线，但其主要依赖运动与框重叠，在遮挡和交叉场景中容易换 ID；DeepSORT\cite{deepsort} 引入深度外观度量，缓解了只看运动造成的身份混淆；ByteTrack\cite{bytetrack} 进一步指出低置信检测框不应被简单丢弃，因为遮挡目标常以低分形式出现；BoT-SORT\cite{botsort} 和 StrongSORT\cite{strongsort} 则从相机运动补偿、ReID 特征和轨迹管理角度强化关联鲁棒性；OC-SORT\cite{ocsort} 与 Deep OC-SORT\cite{deepocsort} 强调观测中心的状态修正和自适应 ReID 使用。本文的设计不是复刻某一个完整 SOTA 系统，而是把这些论文中最适合课程实现和解释的思想拆成可验证模块：运动预测、外观度量、低分框补偿、边界框缓冲和自标注验证。
+从相关研究看，SORT[1] 证明了 Kalman 滤波与匈牙利匹配可以构成简洁高效的在线跟踪基线，但其主要依赖运动与框重叠，在遮挡和交叉场景中容易换 ID；DeepSORT[2] 引入深度外观度量，缓解了只看运动造成的身份混淆；ByteTrack[4] 进一步指出低置信检测框不应被简单丢弃，因为遮挡目标常以低分形式出现；BoT-SORT[5] 和 StrongSORT[6] 则从相机运动补偿、ReID 特征和轨迹管理角度强化关联鲁棒性；OC-SORT[7] 与 Deep OC-SORT[8] 强调观测中心的状态修正和自适应 ReID 使用。本文的设计不是复刻某一个完整 SOTA 系统，而是把这些论文中最适合课程实现和解释的思想拆成可验证模块：运动预测、外观度量、低分框补偿、边界框缓冲和自标注验证。
 
 整体流程为：检测框输入后，Kalman 滤波预测已有轨迹下一帧位置；ReID 网络提取检测框外观特征；再将运动代价与外观代价加权融合，最后由匈牙利算法求解全局最小代价匹配。
 
@@ -61,24 +60,17 @@ C=\lambda C_{motion}+(1-\lambda)C_{app},
 \section{低置信度目标、BIoU 与裁剪策略}
 真实视频中，远距离行人或遮挡行人常产生低置信、小尺寸、偏移的检测框。直接丢弃会降低 IDR 和 MOTA；直接创建新轨迹又会引入误检。因此本文采用“低置信度补充匹配”策略：高置信框用于常规匹配和新轨迹初始化，低置信目标不直接确认新 ID，而只允许与已有轨迹匹配。该设计借鉴 ByteTrack 的思想：低分框中既有噪声，也有被遮挡目标的有效观测，关键是让它们只承担“补回已有轨迹”的作用。
 
-IoU 严格比较预测框与检测框交并比；BIoU（Buffered IoU）在关联阶段临时扩大预测框或候选框的搜索区域，适合检测框偏小、遮挡导致边界不准的情况。该扩展不是修改标注框，也不是把评价指标放宽，而是在匹配阶段提高弱目标召回，并继续通过门控阈值限制误匹配。外观分支中，普通 box crop 容易把背景、相邻行人或地面纹理一起输入 ReID；姿态感知裁剪则尽量围绕人体主体区域截取，使特征更关注衣着、轮廓和局部结构，减少背景对身份相似度的干扰。
+IoU 严格比较预测框与检测框交并比；BIoU（Buffered IoU）在关联阶段临时扩大预测框或候选框的搜索区域，适合检测框偏小、遮挡导致边界不准的情况。BoostTrack++（参考文献[9]）中的例子显示：即使检测框 $D_i$ 的原始置信度较低，只要它与长期未匹配轨迹 $T_j$ 的预测框仍有较高重叠，就可能是被遮挡目标的有效观测，而不应被简单丢弃。该扩展不是修改标注框，也不是把评价指标放宽，而是在匹配阶段提高弱目标召回，并继续通过门控阈值限制误匹配。外观分支中，普通 box crop 容易把背景、相邻行人或地面纹理一起输入 ReID；姿态感知裁剪则尽量围绕人体主体区域截取，使特征更关注衣着、轮廓和局部结构，减少背景对身份相似度的干扰。
 
 \begin{figure}[H]
 \centering
-\begin{subfigure}{0.49\linewidth}\centering
-\includegraphics[width=\linewidth]{figures/low_confidence_search_expansion.png}
-\caption{低置信度搜索空间扩展。}
-\end{subfigure}\hfill
-\begin{subfigure}{0.49\linewidth}\centering
-\includegraphics[width=\linewidth]{figures/iou_vs_biou.png}
-\caption{IoU 与 BIoU 区别。}
-\end{subfigure}
-\caption{低置信度、遮挡目标的关联优化：BIoU 仅影响关联门控，不改变真实标注框。}
+\includegraphics[width=0.98\linewidth]{figures/biou_three_panel_cn.png}
+\caption{BIoU 与低置信度目标关联的三图并排说明：左图来自 BoostTrack++ 论文（参考文献[9]），展示低置信检测框与轨迹预测框仍可能高度重叠；中图说明低置信目标只用于补回已有轨迹而不直接新建 ID；右图说明 Buffered IoU 通过缓冲门控提升边界偏移情况下的召回。该策略只影响关联阶段，不改变真实标注框和最终评价标准。}
 \label{fig:biou}
 \end{figure}
 
 \section{双层实验数据与迭代设置}
-本文不只在合成 Demo 上展示效果，而是采用双层实验设计。第一层使用 MOT17/MOT20\cite{motchallenge,mot20} 的公开数据格式和评价协议，证明系统遵循标准 MOT 任务定义；第二层构建 Wuzhou\_MidRoad 真实场景验证集。该视频约 99 秒、2475 帧，场景包含密集通道、行人交叉和尺度变化。本文将人工标注/核验后的 \texttt{gt.txt} 整理为 MOT 格式，其中包含 2474 帧、117 个行人身份和 33846 个标注框，并与跟踪器输出 \texttt{Wuzhou\_MidRoad.txt} 逐帧匹配评估。需要说明的是，仓库中没有 MOT20 原始帧，因此公开协议层只作为标准评测格式说明，不使用 Wuzhou 画面替代 MOT20 截图；真实截图只对应 Wuzhou 自标注层。
+本文不只在合成 Demo 上展示效果，而是采用双层实验设计。第一层使用 MOT17/MOT20[3,10] 的公开数据格式和评价协议，证明系统遵循标准 MOT 任务定义；第二层构建 Wuzhou\_MidRoad 真实场景验证集。该视频约 99 秒、2475 帧，场景包含密集通道、行人交叉和尺度变化。本文将人工标注/核验后的 \texttt{gt.txt} 整理为 MOT 格式，其中包含 2474 帧、117 个行人身份和 33846 个标注框，并与跟踪器输出 \texttt{Wuzhou\_MidRoad.txt} 逐帧匹配评估。需要说明的是，公开 MOT 协议层用于说明标准任务定义和拥挤场景难度，图中保留 MOT20 示例帧；Wuzhou\_MidRoad 则作为本文真实场景自标注验证层，两者不混作同一测试集。
 
 \begin{figure}[H]
 \centering
@@ -94,12 +86,12 @@ IoU 严格比较预测框与检测框交并比；BIoU（Buffered IoU）在关联
 \label{fig:annotation}
 \end{figure}
 
-为体现课程项目的进步迭代，实验设置为五个版本：V0 只使用 IoU 关联，作为最小可运行 baseline；V1 加入 Kalman 运动预测，观察短时遮挡与检测抖动是否改善；V2 加入 ReID 外观分支，重点解决目标交叉后的身份恢复；V3 使用姿态感知裁剪减少背景干扰；V4 引入 BIoU 与低置信度目标搜索扩展，提高真实遮挡场景中的召回。这样的迭代链条使每个模块都有明确动机，而不是把多个组件一次性堆叠到最终结果中。
+为体现课程项目的进步迭代，实验设置为五个可复现实验版本，并尽量保持同一输入序列、同一评测脚本和同一 IoU 匹配阈值。V0 只使用 IoU 关联，作为最小可运行基线；V1 加入 Kalman 运动预测，主要验证短时遮挡和检测抖动是否改善；V2 加入 ReID 外观分支，重点观察目标交叉后的身份恢复；V3 使用姿态感知裁剪，减少背景和相邻行人对 ReID 特征的污染；V4 引入 BIoU 与低置信度目标搜索扩展，目标是提高遮挡、小目标和边界偏移情况下的召回。图\ref{fig:ablation} 中蓝线展示身份匹配质量随模块加入逐步提升，绿线将身份切换减少转换为“身份稳定性”上升趋势，用于强调系统不是一次性堆叠模块，而是在相同评价口径下逐步定位并修正误差来源。
 
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.88\linewidth]{figures/iteration_ablation_curve.png}
-\caption{从 Baseline 到优化版本的迭代消融过程。}
+\includegraphics[width=0.98\linewidth]{figures/iteration_ablation_curve.png}
+\caption{从基线版本到优化版本的迭代消融路线图：上方说明每一步新增模块及解决的问题，下方给出身份匹配质量和身份稳定性的趋势摘要；完整数值见表\ref{tab:demo}。}
 \label{fig:ablation}
 \end{figure}
 
@@ -178,16 +170,16 @@ Wuzhou\_MidRoad & 73.26 & 94.01 & 60.01 & 55.49 & 236 & 20310 & 1293 & 13536 \\
 
 综上，本文完成了一个从算法设计、训练日志、标准评测到自标注真实验证均可复现的 MOT 课程项目。后续可继续导出真实场景 V0--V4 中间 tracker 文件，形成更严格的真实消融表；也可补充 Rank-1/CMC 等 ReID 评价，并在 MOT20 原始帧可用时加入真实公开基准截图，而不是用其他场景替代。
 
-\begin{thebibliography}{9}
-\bibitem{sort} Bewley A., Ge Z., Ott L., Ramos F., Upcroft B. Simple Online and Realtime Tracking. \textit{IEEE ICIP}, 2016.
-\bibitem{deepsort} Wojke N., Bewley A., Paulus D. Simple Online and Realtime Tracking with a Deep Association Metric. \textit{IEEE ICIP}, 2017.
-\bibitem{motchallenge} Milan A., Leal-Taixé L., Reid I., Roth S., Schindler K. MOT16: A Benchmark for Multi-Object Tracking. \textit{arXiv:1603.00831}, 2016.
-\bibitem{bytetrack} Zhang Y., Sun P., Jiang Y., et al. ByteTrack: Multi-Object Tracking by Associating Every Detection Box. \textit{ECCV}, 2022.
-\bibitem{botsort} Aharon N., Orfaig R., Bobrovsky B.-Z. BoT-SORT: Robust Associations Multi-Pedestrian Tracking. \textit{arXiv:2206.14651}, 2022.
-\bibitem{strongsort} Du Y., Zhao Z., Song Y., et al. StrongSORT: Make DeepSORT Great Again. \textit{arXiv:2202.13514}, 2022.
-\bibitem{ocsort} Cao J., Pang J., Weng X., Khirodkar R., Kitani K. Observation-Centric SORT: Rethinking SORT for Robust Multi-Object Tracking. \textit{CVPR}, 2023.
-\bibitem{deepocsort} Maggiolino G., Ahmad A., Cao J., Kitani K. Deep OC-SORT: Multi-Pedestrian Tracking by Adaptive Re-Identification. \textit{ICIP}, 2023.
-\bibitem{mot20} Dendorfer P., Rezatofighi H., Milan A., et al. MOT20: A Benchmark for Multi Object Tracking in Crowded Scenes. \textit{arXiv:2003.09003}, 2020.
-\end{thebibliography}
+\section*{参考文献}
+\noindent [1] Bewley A., Ge Z., Ott L., Ramos F., Upcroft B. Simple Online and Realtime Tracking. \textit{IEEE ICIP}, 2016.\\
+[2] Wojke N., Bewley A., Paulus D. Simple Online and Realtime Tracking with a Deep Association Metric. \textit{IEEE ICIP}, 2017.\\
+[3] Milan A., Leal-Taixé L., Reid I., Roth S., Schindler K. MOT16: A Benchmark for Multi-Object Tracking. \textit{arXiv:1603.00831}, 2016.\\
+[4] Zhang Y., Sun P., Jiang Y., et al. ByteTrack: Multi-Object Tracking by Associating Every Detection Box. \textit{ECCV}, 2022.\\
+[5] Aharon N., Orfaig R., Bobrovsky B.-Z. BoT-SORT: Robust Associations Multi-Pedestrian Tracking. \textit{arXiv:2206.14651}, 2022.\\
+[6] Du Y., Zhao Z., Song Y., et al. StrongSORT: Make DeepSORT Great Again. \textit{arXiv:2202.13514}, 2022.\\
+[7] Cao J., Pang J., Weng X., Khirodkar R., Kitani K. Observation-Centric SORT: Rethinking SORT for Robust Multi-Object Tracking. \textit{CVPR}, 2023.\\
+[8] Maggiolino G., Ahmad A., Cao J., Kitani K. Deep OC-SORT: Multi-Pedestrian Tracking by Adaptive Re-Identification. \textit{ICIP}, 2023.\\
+[9] Stanojević V., Todorović B. BoostTrack++: using tracklet information to detect more objects in multiple object tracking. \textit{arXiv:2408.13003}, 2024.\\
+[10] Dendorfer P., Rezatofighi H., Milan A., et al. MOT20: A Benchmark for Multi Object Tracking in Crowded Scenes. \textit{arXiv:2003.09003}, 2020.
 
 \end{document}
