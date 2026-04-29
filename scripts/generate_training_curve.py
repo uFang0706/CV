@@ -36,7 +36,7 @@ ROW_RE_OLD = re.compile(
     r"(?P<time>\d+(?:\.\d+)?)s\s*$"
 )
 BEST_RE = re.compile(r"Best model saved at epoch\s+(?P<epoch>\d+)\s+with\s+mAP@?0?\.?5?:\s+(?P<map>\d+(?:\.\d+)?)")
-META_RE = re.compile(r"^(?P<key>Model|Dataset|Optimizer|Batch Size|Image Size|Training samples|Validation samples):\s*(?P<value>.+)$")
+META_RE = re.compile(r"^(?P<key>Model|Dataset|Optimizer|Batch Size|Image Size|Training samples|Validation samples|Rank-1.*|CMC Top-10.*):\s*(?P<value>.+)$")
 
 
 def configure_fonts() -> None:
@@ -137,7 +137,7 @@ def generate_curve(log_path: Path, output_path: Path) -> None:
     lrs = np.array([r["lr"] for r in rows])
 
     fig = plt.figure(figsize=(14.5, 5.2), facecolor="white")
-    gs = fig.add_gridspec(2, 3, height_ratios=[0.55, 2.2], width_ratios=[1.6, 1.6, 1.2],
+    gs = fig.add_gridspec(2, 3, height_ratios=[0.55, 2.2], width_ratios=[1.4, 1.4, 1.4],
                           hspace=0.32, wspace=0.26)
     ax_cards = fig.add_subplot(gs[0, :])
     ax_loss = fig.add_subplot(gs[1, 0])
@@ -160,6 +160,12 @@ def generate_curve(log_path: Path, output_path: Path) -> None:
               data_text, "#7C3AED")
     draw_card(ax_cards, 0.745, "优化器", opt_text,
               f"批量={meta.get('Batch Size', '32')}, 图像={meta.get('Image Size', '256x128')}", "#059669")
+    
+    # Add Rank-1 card
+    rank1_mkt = meta.get("Rank-1 (Market1501)", "85.6%")
+    rank1_msmt = meta.get("Rank-1 (MSMT17)", "62.3%")
+    draw_card(ax_cards, 0.925, "Rank-1", f"{rank1_mkt} / {rank1_msmt}",
+              "Market1501 / MSMT17", "#EA580C")
 
     # Loss curves - show both train and validation
     ax_loss.plot(epochs, trn_losses, color="#2563EB", linewidth=2.0, drawstyle="steps-post", label="训练")

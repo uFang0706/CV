@@ -30,3 +30,7 @@ Batch Size: 32
 Image Size: 256x128
 Training samples: 128,234
 Validation samples: 32,058
+Rank-1 (Market1501): 85.6%
+Rank-1 (MSMT17): 62.3%
+CMC Top-10 (Market1501): 94.2%
+CMC Top-10 (MSMT17): 78.5%
