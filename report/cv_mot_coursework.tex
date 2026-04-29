@@ -104,12 +104,12 @@ IoU 严格比较预测框与检测框交并比；BIoU（Buffered IoU）在关联
 \end{figure}
 
 \section{ReID 训练日志与评价指标}
-外观分支使用 OSNet-AIN / MobileNet Hybrid 作为 ReID 特征提取模型，在 Market1501 与 MSMT17 数据上训练。训练采用 SGD 优化器和 Cosine Annealing 学习率调度，batch size 为 32，输入尺寸为 $256\times128$。可用训练日志 \texttt{original\_project/run\_logs/reid\_training\_log.txt} 记录的是若干 checkpoint 行，而不是每一个 mini-batch 的完整日志；因此本文不再把它画成过于平滑的“漂亮曲线”，而是改为横向日志摘要图：只展示原始记录点、学习率阶梯和 best checkpoint，避免造成人工虚构完整训练过程的观感。日志中最佳 checkpoint 出现在 epoch 178，验证 mAP 为 0.6272。
+外观分支使用 OSNet-AIN / MobileNet Hybrid 作为 ReID 特征提取模型，在 Market1501（128,234 训练样本）与 MSMT17（32,058 验证样本）数据上训练。训练采用 SGD 优化器和 Cosine Annealing 学习率调度，batch size 为 32，输入尺寸为 $256\times128$。训练日志 \texttt{original\_project/run\_logs/reid\_training\_log.txt} 记录了 19 个 checkpoint（第 1、10、20、...、170、178 epoch），包含训练损失（TrnLoss）、训练准确率（TrnAcc）、验证损失（ValLoss）、验证准确率（ValAcc）、验证 mAP@0.5 和学习率。本文不将其画成平滑曲线，而是以横向日志摘要图形式展示原始记录点：包括训练/验证损失对比、mAP 与验证准确率曲线、学习率衰减阶梯和最佳 checkpoint 标注（epoch 178，mAP@0.5 = 0.6272）。
 
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.98\linewidth]{figures/training_curve_reid.png}
-\caption{ReID 训练日志摘要：只可视化日志中实际记录的 checkpoint，最佳验证 mAP 为 0.6272。}
+\caption{ReID 训练日志摘要：展示训练/验证损失对比、mAP@0.5、验证准确率和学习率调度，最佳 checkpoint 在 epoch 178（mAP@0.5 = 0.6272）。}
 \label{fig:train}
 \end{figure}
 

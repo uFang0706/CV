@@ -20,13 +20,23 @@ import numpy as np
 
 ROW_RE = re.compile(
     r"^\s*(?P<epoch>\d+)\s+"
+    r"(?P<trn_loss>\d+(?:\.\d+)?)\s+"
+    r"(?P<trn_acc>\d+(?:\.\d+)?)\s+"
+    r"(?P<val_loss>\d+(?:\.\d+)?)\s+"
+    r"(?P<val_acc>\d+(?:\.\d+)?)\s+"
+    r"(?P<map>\d+(?:\.\d+)?)\s+"
+    r"(?P<lr>\d+(?:\.\d+)?)\s+"
+    r"(?P<time>\d+(?:\.\d+)?)s\s*$"
+)
+ROW_RE_OLD = re.compile(
+    r"^\s*(?P<epoch>\d+)\s+"
     r"(?P<loss>\d+(?:\.\d+)?)\s+"
     r"(?P<map>\d+(?:\.\d+)?)\s+"
     r"(?P<lr>\d+(?:\.\d+)?)\s+"
     r"(?P<time>\d+(?:\.\d+)?)s\s*$"
 )
 BEST_RE = re.compile(r"Best model saved at epoch\s+(?P<epoch>\d+)\s+with\s+mAP@?0?\.?5?:\s+(?P<map>\d+(?:\.\d+)?)")
-META_RE = re.compile(r"^(?P<key>Model|Dataset|Optimizer|Batch Size|Image Size):\s*(?P<value>.+)$")
+META_RE = re.compile(r"^(?P<key>Model|Dataset|Optimizer|Batch Size|Image Size|Training samples|Validation samples):\s*(?P<value>.+)$")
 
 
 def configure_fonts() -> None:
@@ -49,8 +59,27 @@ def parse_training_log(path: Path):
     rows = []
     meta = {}
     best = None
+    is_new_format = False
+    
     for line in path.read_text(encoding="utf-8").splitlines():
+        # Try new format first
         m = ROW_RE.match(line)
+        if m:
+            is_new_format = True
+            rows.append({
+                "epoch": int(m.group("epoch")),
+                "trn_loss": float(m.group("trn_loss")),
+                "trn_acc": float(m.group("trn_acc")),
+                "val_loss": float(m.group("val_loss")),
+                "val_acc": float(m.group("val_acc")),
+                "map": float(m.group("map")),
+                "lr": float(m.group("lr")),
+                "time": float(m.group("time")),
+            })
+            continue
+        
+        # Try old format
+        m = ROW_RE_OLD.match(line)
         if m:
             rows.append({
                 "epoch": int(m.group("epoch")),
@@ -60,19 +89,24 @@ def parse_training_log(path: Path):
                 "time": float(m.group("time")),
             })
             continue
+        
         b = BEST_RE.search(line)
         if b:
             best = {"epoch": int(b.group("epoch")), "map": float(b.group("map"))}
             continue
+        
         mm = META_RE.match(line)
         if mm:
             meta[mm.group("key")] = mm.group("value")
+    
     if not rows:
         raise ValueError(f"No epoch rows found in {path}")
+    
     if best is None:
         best_row = max(rows, key=lambda r: r["map"])
         best = {"epoch": best_row["epoch"], "map": best_row["map"]}
-    return rows, best, meta
+    
+    return rows, best, meta, is_new_format
 
 
 def draw_card(ax, x, title, value, subtitle, color):
@@ -85,15 +119,26 @@ def draw_card(ax, x, title, value, subtitle, color):
 
 
 def generate_curve(log_path: Path, output_path: Path) -> None:
-    rows, best, meta = parse_training_log(log_path)
+    rows, best, meta, is_new_format = parse_training_log(log_path)
     epochs = np.array([r["epoch"] for r in rows])
-    losses = np.array([r["loss"] for r in rows])
+    
+    if is_new_format:
+        trn_losses = np.array([r["trn_loss"] for r in rows])
+        trn_accs = np.array([r["trn_acc"] for r in rows])
+        val_losses = np.array([r["val_loss"] for r in rows])
+        val_accs = np.array([r["val_acc"] for r in rows])
+    else:
+        trn_losses = np.array([r.get("loss", r.get("trn_loss", 0)) for r in rows])
+        val_losses = trn_losses * 1.05  # Simulate validation loss
+        trn_accs = None
+        val_accs = None
+    
     maps = np.array([r["map"] for r in rows])
     lrs = np.array([r["lr"] for r in rows])
 
-    fig = plt.figure(figsize=(14.5, 4.1), facecolor="white")
-    gs = fig.add_gridspec(2, 3, height_ratios=[0.58, 2.0], width_ratios=[1.7, 1.7, 1.1],
-                          hspace=0.28, wspace=0.28)
+    fig = plt.figure(figsize=(14.5, 5.2), facecolor="white")
+    gs = fig.add_gridspec(2, 3, height_ratios=[0.55, 2.2], width_ratios=[1.6, 1.6, 1.2],
+                          hspace=0.32, wspace=0.26)
     ax_cards = fig.add_subplot(gs[0, :])
     ax_loss = fig.add_subplot(gs[1, 0])
     ax_map = fig.add_subplot(gs[1, 1])
@@ -104,25 +149,42 @@ def generate_curve(log_path: Path, output_path: Path) -> None:
                                      facecolor="#F8FAFC", edgecolor="#CBD5E1", linewidth=1.0))
     draw_card(ax_cards, 0.025, "BEST CHECKPOINT", f"Epoch {best['epoch']} / mAP {best['map']:.4f}",
               "reported by the saved log summary", "#DC2626")
-    draw_card(ax_cards, 0.285, "LOG DENSITY", f"{len(rows)} sampled rows", 
+    draw_card(ax_cards, 0.265, "LOG DENSITY", f"{len(rows)} sampled rows", 
               "raw checkpoints only; no interpolation claim", "#2563EB")
-    draw_card(ax_cards, 0.515, "MODEL / DATA", meta.get("Model", "OSNet-AIN / MobileNet Hybrid"),
+    draw_card(ax_cards, 0.495, "MODEL / DATA", meta.get("Model", "OSNet-AIN / MobileNet Hybrid"),
               meta.get("Dataset", "Market1501 + MSMT17"), "#7C3AED")
-    draw_card(ax_cards, 0.765, "OPTIMIZER", meta.get("Optimizer", "SGD + Cosine Annealing"),
+    draw_card(ax_cards, 0.745, "OPTIMIZER", meta.get("Optimizer", "SGD + Cosine Annealing"),
               f"batch={meta.get('Batch Size', '32')}, image={meta.get('Image Size', '256x128')}", "#059669")
 
-    # Use raw logged points and step style rather than smooth-looking curves.
-    ax_loss.plot(epochs, losses, color="#2563EB", linewidth=2.0, drawstyle="steps-post")
-    ax_loss.scatter(epochs, losses, s=28, color="white", edgecolor="#2563EB", linewidth=1.6, zorder=3)
-    ax_loss.fill_between(epochs, losses, losses.min() - 0.08, step="post", color="#DBEAFE", alpha=0.55)
+    # Loss curves - show both train and validation
+    ax_loss.plot(epochs, trn_losses, color="#2563EB", linewidth=2.0, drawstyle="steps-post", label="Train")
+    ax_loss.scatter(epochs, trn_losses, s=24, color="white", edgecolor="#2563EB", linewidth=1.4, zorder=3)
+    
+    if is_new_format:
+        ax_loss.plot(epochs, val_losses, color="#EF4444", linewidth=2.0, drawstyle="steps-post", label="Val")
+        ax_loss.scatter(epochs, val_losses, s=24, color="white", edgecolor="#EF4444", linewidth=1.4, zorder=3)
+        ax_loss.legend(fontsize=9)
+    
+    ax_loss.fill_between(epochs, trn_losses, trn_losses.min() - 0.1, step="post", color="#DBEAFE", alpha=0.45)
     ax_loss.set_title("Loss: logged checkpoints", fontsize=10.5, fontweight="bold")
     ax_loss.set_xlabel("Epoch")
     ax_loss.set_ylabel("Loss")
     ax_loss.grid(True, axis="y", alpha=0.25)
     ax_loss.spines[["top", "right"]].set_visible(False)
 
+    # mAP curve
     ax_map.plot(epochs, maps, color="#DC2626", linewidth=2.0, drawstyle="steps-post")
     ax_map.scatter(epochs, maps, s=28, color="white", edgecolor="#DC2626", linewidth=1.6, zorder=3)
+    
+    # If we have validation accuracy, show it too
+    if is_new_format:
+        ax_map_twin = ax_map.twinx()
+        ax_map_twin.plot(epochs, val_accs, color="#3B82F6", linewidth=1.8, drawstyle="steps-post", alpha=0.7)
+        ax_map_twin.scatter(epochs, val_accs, s=20, color="white", edgecolor="#3B82F6", linewidth=1.2, zorder=3)
+        ax_map_twin.set_ylabel("Val Acc", color="#3B82F6")
+        ax_map_twin.tick_params(axis='y', labelcolor="#3B82F6")
+        ax_map_twin.set_ylim(0, 0.8)
+    
     ax_map.scatter([best["epoch"]], [best["map"]], marker="*", s=170, color="#F59E0B",
                    edgecolor="#111827", linewidth=0.8, zorder=4)
     ax_map.annotate(f"best {best['map']:.4f}", xy=(best["epoch"], best["map"]),
@@ -136,16 +198,17 @@ def generate_curve(log_path: Path, output_path: Path) -> None:
     ax_map.grid(True, axis="y", alpha=0.25)
     ax_map.spines[["top", "right"]].set_visible(False)
 
+    # LR schedule
     ax_lr.semilogy(epochs, lrs, color="#059669", linewidth=2.0, drawstyle="steps-post")
     ax_lr.scatter(epochs, lrs, s=24, color="white", edgecolor="#059669", linewidth=1.4)
-    ax_lr.set_title("LR schedule", fontsize=10.5, fontweight="bold")
+    ax_lr.set_title("LR schedule (cosine annealing)", fontsize=10.5, fontweight="bold")
     ax_lr.set_xlabel("Epoch")
-    ax_lr.set_ylabel("LR (log)")
+    ax_lr.set_ylabel("LR (log scale)")
     ax_lr.grid(True, which="both", axis="y", alpha=0.25)
     ax_lr.spines[["top", "right"]].set_visible(False)
 
     fig.suptitle("ReID Training Log Summary (raw recorded checkpoints, not a smoothed synthetic curve)",
-                 x=0.5, y=0.99, fontsize=13, fontweight="bold", color="#0F172A")
+                 x=0.5, y=0.985, fontsize=13, fontweight="bold", color="#0F172A")
     output_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(output_path, dpi=190, bbox_inches="tight", facecolor="white")
     plt.close(fig)
